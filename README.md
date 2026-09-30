@@ -15,21 +15,32 @@ No third-party packages. The helper scripts use only the Python standard library
 
 ## Use it
 
-**Any project, one time per machine** (then `/project-init` works everywhere):
-```
-git clone https://github.com/Duc42195/agent-init.git ~/.claude/agent-init && ~/.claude/agent-init/install.sh
-```
-Restart Claude Code in your project and type `/project-init`.
+`install.sh` writes the `/project-init` command for the agent(s) you name: `claude`, `cursor`, `copilot`, `codex`, `gemini`, `all`, or `other` (no command file; you tell the agent to read `init.md`). Without `--agent` it asks.
 
-**One project only.** From the project root:
+**Every project, once per machine:**
 ```
-git clone https://github.com/Duc42195/agent-init.git && agent-init/install.sh --project
+git clone https://github.com/Duc42195/agent-init.git ~/.agent-init && ~/.agent-init/install.sh --agent claude
 ```
-Restart Claude Code, type `/project-init`. Delete `agent-init/` afterwards if you like; keep it out of git or add it to `.gitignore`.
+
+**One project only** (run from the project root; add `agent-init/` to `.gitignore` or delete it afterwards):
+```
+git clone https://github.com/Duc42195/agent-init.git && agent-init/install.sh --agent claude --project
+```
+
+Then restart the agent and type `/project-init`. Several agents: `--agent claude,cursor`.
+
+| Agent | User-wide | `--project` |
+|---|---|---|
+| claude | `~/.claude/commands/` | `.claude/commands/` |
+| cursor | `~/.cursor/commands/` | `.cursor/commands/` |
+| copilot | not supported | `.github/prompts/` |
+| codex | `~/.codex/prompts/` | not supported |
+| gemini | `~/.gemini/commands/` | `.gemini/commands/` |
+| other | no file: tell the agent "Read and follow /path/to/agent-init/init.md" | same |
 
 **New projects from a template.** Tick *Template repository* in the GitHub settings, click *Use this template* per project; `.claude/commands/project-init.md` finds `./init.md` itself.
 
-**Other AI tools (Cursor, Copilot, ...).** Tell the agent: "Read and follow /path/to/agent-init/init.md." `/done` variants for Cursor and Copilot are in `templates/`.
+`/done` variants for Cursor and Copilot are in `templates/`.
 
 `/init` is a built-in Claude Code command that creates `CLAUDE.md`, so this repo uses the name `/project-init`.
 
