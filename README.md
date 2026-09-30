@@ -44,6 +44,15 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 
 `/init` is a built-in Claude Code command that creates `CLAUDE.md`, so this repo uses the name `/project-init`.
 
+## Updates
+
+Versions are in `VERSION` and `CHANGELOG.md` (each release lists `Upgrade:` steps for existing projects).
+
+- **You installed the clone:** `/project-init` first runs `git fetch` on it and tells you if it is behind. Update with `~/.agent-init/install.sh --update` (fast-forward only, prints what changed).
+- **A project already scaffolded:** it stores its version in `.agents/init-version`, and `AGENTS.md` tells the agent to run `.agents/tools/check_update.py` at session start. That script asks GitHub for `VERSION` at most once a week and prints nothing unless a newer version exists (then it shows the new changelog entries). It never changes files and stays silent offline. Opt out with `AGENT_INIT_NO_UPDATE_CHECK=1`. To upgrade, run `/project-init` in the project: it detects the old version, applies the `Upgrade:` steps and asks before touching files you modified.
+
+Releasing: bump `VERSION`, add the matching top entry to `CHANGELOG.md` (the smoke test checks they agree).
+
 ## Other agents, and helping improve this
 
 Only Claude Code is tested here. If you use another agent, **please [raise an issue](https://github.com/Duc42195/agent-init/issues/new?template=init-report.yml)** with how it went, good or bad.
@@ -63,12 +72,13 @@ You can also score any project yourself: `python tools/score_init.py /path/to/pr
 ## Files
 
 ```
+VERSION, CHANGELOG.md              release version and upgrade notes
 install.sh                         installs the /project-init command (global or per project)
 init.md                            the procedure the agent follows (short)
 templates/                         every file the agent copies, mirroring target paths
   AGENTS.md, CLAUDE.md, pointer.md, gitignore.append
   plan.csv                         the plan, at the project root
-  .agents/                         roles, adr/, wiki/, tools/*.py
+  .agents/                         roles, adr/, wiki/, tools/*.py (incl. check_update.py), init-version
   .claude/ .cursor/ .github/       /done command per AI tool
 tools/score_init.py                scores a scaffolded project, writes the init report
 tests/smoke_test.py                scaffolds into a temp dir and runs the checks

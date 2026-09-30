@@ -3,6 +3,7 @@
 
   python tests/smoke_test.py
 """
+import os
 import re
 import shutil
 import subprocess
@@ -34,6 +35,7 @@ def scaffold(dest):
         for k, v in VALUES.items():
             text = text.replace("{{%s}}" % k, v)
         out.write_text(text, encoding="utf-8")
+    (dest / ".agents/init-version").write_text((ROOT / "VERSION").read_text())
 
 
 def main():
@@ -85,6 +87,29 @@ def main():
         if code:
             failures.append(f"sync_plan push (none): {out}")
 
+        # update notice: newer remote -> message with changelog; same -> silent; throttled -> silent
+        import os
+        remote = Path(tempfile.mkdtemp())
+        (remote / "VERSION").write_text("9.9.9\n")
+        (remote / "CHANGELOG.md").write_text("# c\n\n## 9.9.9 — 2030-01-01\n- Upgrade: do x\n\n## 0.0.1 — old\n- y\n")
+        env = dict(os.environ, AGENT_INIT_REMOTE=remote.as_uri())
+        chk = [sys.executable, ".agents/tools/check_update.py"]
+        r = subprocess.run(chk + ["--force"], cwd=tmp, capture_output=True, text=True, env=env)
+        if "9.9.9" not in r.stdout or "do x" not in r.stdout or "0.0.1" in r.stdout:
+            failures.append(f"check_update newer: {r.stdout}{r.stderr}")
+        r = subprocess.run(chk, cwd=tmp, capture_output=True, text=True, env=env)
+        if r.stdout:
+            failures.append(f"check_update not throttled: {r.stdout}")
+        (remote / "VERSION").write_text((ROOT / "VERSION").read_text())
+        r = subprocess.run(chk + ["--force"], cwd=tmp, capture_output=True, text=True, env=env)
+        if "up to date" not in r.stdout:
+            failures.append(f"check_update same version: {r.stdout}")
+        env["AGENT_INIT_REMOTE"] = "file:///nonexistent"
+        r = subprocess.run(chk, cwd=tmp, capture_output=True, text=True, env=env)
+        if r.returncode or r.stdout:
+            failures.append("check_update offline not silent")
+        shutil.rmtree(remote, ignore_errors=True)
+
         # ADR rules: two accepted ADRs on one topic must fail; a run-id check must catch stale numbers.
         adr = tmp / ".agents/adr"
         tpl = (adr / "0000-template.md").read_text()
@@ -110,9 +135,34 @@ def main():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+    # release hygiene: VERSION equals the newest CHANGELOG heading
+    top = re.search(r"(?m)^## (\d+\.\d+\.\d+)", (ROOT / "CHANGELOG.md").read_text())
+    if not top or top.group(1) != (ROOT / "VERSION").read_text().strip():
+        failures.append("VERSION does not match the top CHANGELOG entry")
+
+    # install.sh --update against a throwaway clone
+    base = Path(tempfile.mkdtemp())
+    def git(*a, cwd):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True,
+                              env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
+    up = base / "up"; shutil.copytree(ROOT, up, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+    git("init", "-q", "-b", "main", cwd=up); git("add", "-A", cwd=up); git("commit", "-qm", "v", cwd=up)
+    clone = base / "clone"; git("clone", "-q", str(up), str(clone), cwd=base)
+    r = subprocess.run(["bash", str(clone / "install.sh"), "--update"], capture_output=True, text=True)
+    if "up to date" not in r.stdout:
+        failures.append(f"install --update when current: {r.stdout}{r.stderr}")
+    (up / "VERSION").write_text("9.0.0\n")
+    (up / "CHANGELOG.md").write_text("# c\n\n## 9.0.0 — d\n- new thing\n" + (up / "CHANGELOG.md").read_text().split("\n", 1)[1])
+    git("commit", "-qam", "next", cwd=up)
+    r = subprocess.run(["bash", str(clone / "install.sh"), "--update"], capture_output=True, text=True)
+    if "9.0.0" not in r.stdout or "new thing" not in r.stdout:
+        failures.append(f"install --update when behind: {r.stdout}{r.stderr}")
+    shutil.rmtree(base, ignore_errors=True)
+
     # init.md must reference only templates that exist.
     init = (ROOT / "init.md").read_text()
-    for path in re.findall(r"\| `((?:\.|[A-Za-z])[^`|]*)` \| ", init):
+    for path in re.findall(r"(?m)^\| `((?:\.|[A-Za-z])[^`|]*)` \| ", init):
         p = path.rstrip("/*")
         if p.startswith("templates"):
             continue

@@ -34,6 +34,7 @@ Learn from the repo before asking:
 - Code or docs only? Check manifests (`pyproject.toml`, `package.json`, `go.mod`, ...). Docs-only means no gate command.
 - Gate command: test/lint from the manifest, `Makefile` or CI config.
 - Which AI tool config folders exist (`.claude/`, `.cursor/`, `.github/`).
+- **Upgrade mode:** if `.agents/init-version` exists, this project is already scaffolded. Do not re-run Steps 2–4. Compare it with `VERSION` next to this file. Same version → say so and stop. Older → read `CHANGELOG.md`, apply every `Upgrade:` line for versions after it, replace unmodified files in `.agents/tools/` with the templates (show a diff and ask for any file the project changed), never touch `plan.csv` rows, wiki, ADRs or `AGENTS.md` content beyond the listed changes, then write the new version to `.agents/init-version`, run Step 6 and report what changed.
 
 If the project has content, summarise it in a few lines and skip every question you can already answer.
 
@@ -76,6 +77,7 @@ Copy, replacing every `{{PLACEHOLDER}}` (no braces left behind), never overwriti
 | `plan.csv` | `plan.csv` (project root) | Add rows for tasks the user named, else keep the example and say so. If one exists, migrate it, do not replace it. |
 | `.agents/adr/*` | same | Includes index README and template. |
 | `.agents/wiki/*` | same | Four append-only logs. |
+| *(the `VERSION` file next to `init.md`)* | `.agents/init-version` | Copy its content. Enables update notices. |
 | `.agents/tools/*.py` | same | `sync_plan.py`: set `BACKEND`, and implement only the chosen tracker's function. |
 | `.claude/commands/done.md` | same | Claude Code. |
 | `.cursor/commands/done.md` | same | Only if Cursor is used. |

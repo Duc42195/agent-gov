@@ -1,20 +1,33 @@
 #!/usr/bin/env bash
 # Install the /project-init command for one or more AI agents.
 #   install.sh [--agent claude,cursor,copilot,codex,gemini,all] [--project]
+#   install.sh --update      pull the latest agent-init (this clone) and show what changed
 # No --agent: asks (or uses claude when not run in a terminal).
 # Default scope is user-wide; --project installs into the current directory.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGENTS=""; PROJECT=0
+AGENTS=""; PROJECT=0; UPDATE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --agent) AGENTS="${2:?--agent needs a value}"; shift 2 ;;
     --project) PROJECT=1; shift ;;
+    --update) UPDATE=1; shift ;;
     -h|--help) sed -n 2,6p "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+if [ "$UPDATE" = 1 ]; then
+  git -C "$REPO" fetch --quiet
+  old="$(tr -d '[:space:]' < "$REPO/VERSION")"
+  if [ "$(git -C "$REPO" rev-list --count HEAD..@{u})" = 0 ]; then echo "already up to date ($old)"; exit 0; fi
+  git -C "$REPO" pull --ff-only --quiet
+  echo "updated $old -> $(tr -d '[:space:]' < "$REPO/VERSION")"
+  git -C "$REPO" diff --unified=0 HEAD@{1} HEAD -- CHANGELOG.md | grep '^+[^+]' | sed 's/^+//' || true
+  echo "projects already scaffolded: run /project-init in them to upgrade"
+  exit 0
+fi
 
 if [ -z "$AGENTS" ]; then
   if [ -t 0 ]; then
@@ -25,7 +38,7 @@ fi
 [ "$AGENTS" = "all" ] && AGENTS="claude,cursor,copilot,codex,gemini"
 
 DESC="Set up the shared agent-governance scaffold (AGENTS.md, .agents/, /done) in this project"
-BODY="Read \`$REPO/init.md\` and follow it step by step. Templates are in \`$REPO/templates/\`.
+BODY="First run \`git -C $REPO fetch --quiet && git -C $REPO status -sb\`; if it is behind, tell the user in one line and ask to run \`$REPO/install.sh --update\` before continuing. Then read \`$REPO/init.md\` and follow it step by step. Templates are in \`$REPO/templates/\`.
 The target is the project root, the directory this agent was opened in, never \`$REPO\` itself."
 
 # scope_dir <project-relative dir> <user-wide dir or "">  -> prints the dir, or nothing if unsupported
