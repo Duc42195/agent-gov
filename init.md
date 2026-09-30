@@ -20,12 +20,15 @@ Four axes:
 
 ## Where the templates are
 
+The target project is the directory Claude Code was opened in. If this file sits in a subfolder (e.g. `./agent-init/`), that folder is only the source: write into the project root, never into it.
+
 All file contents live in `templates/`, mirroring the target paths. Find that folder next to this file, or in `~/.claude/templates/templates/`. Copy files from there; do not retype them. Only read a template when you are about to create it.
 
 ## Step 1 — Read what exists
 
 Learn from the repo before asking:
 - Git repo? Which host (`git remote -v`)? Default branch?
+- A `plan.csv` at the project root (or elsewhere) from an older setup: keep it, and when writing `.agents/plan.csv` migrate its rows into the new columns instead of discarding them.
 - Existing `README*`, `AGENTS.md`, `CLAUDE.md`, `.agents/`, `plan.csv`, `docs/adr/`, notes.
 - Code or docs only? Check manifests (`pyproject.toml`, `package.json`, `go.mod`, ...). Docs-only means no gate command.
 - Gate command: test/lint from the manifest, `Makefile` or CI config.

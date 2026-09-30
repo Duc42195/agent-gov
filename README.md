@@ -15,16 +15,21 @@ No third-party packages. The helper scripts use only the Python standard library
 
 ## Use it
 
-**Recommended: GitHub template repo.**
-1. Publish this repo, then in *Settings* tick *Template repository*.
-2. For each new project click *Use this template*, clone the new repo, open Claude Code in it.
-3. Type `/project-init`.
+**Any project, one time per machine** (then `/project-init` works everywhere):
+```
+git clone https://github.com/Duc42195/agent-init.git ~/.claude/agent-init && ~/.claude/agent-init/install.sh
+```
+Restart Claude Code in your project and type `/project-init`.
 
-**Add to an existing project.** Copy `init.md`, `templates/` and `.claude/commands/project-init.md` into it, then type `/project-init`.
+**One project only.** From the project root:
+```
+git clone https://github.com/Duc42195/agent-init.git && agent-init/install.sh --project
+```
+Restart Claude Code, type `/project-init`. Delete `agent-init/` afterwards if you like; keep it out of git or add it to `.gitignore`.
 
-**Other AI tools (Cursor, Copilot, ...).** `init.md` and `templates/` are needed (`/done` variants for Cursor and Copilot are included). Tell the agent: "Read and follow init.md."
+**New projects from a template.** Tick *Template repository* in the GitHub settings, click *Use this template* per project; `.claude/commands/project-init.md` finds `./init.md` itself.
 
-**Use it in every project without copying.** Put `init.md` and `templates/` in `~/.claude/templates/` and `project-init.md` in `~/.claude/commands/`.
+**Other AI tools (Cursor, Copilot, ...).** Tell the agent: "Read and follow /path/to/agent-init/init.md." `/done` variants for Cursor and Copilot are in `templates/`.
 
 `/init` is a built-in Claude Code command that creates `CLAUDE.md`, so this repo uses the name `/project-init`.
 
@@ -39,6 +44,7 @@ No third-party packages. The helper scripts use only the Python standard library
 ## Files
 
 ```
+install.sh                         installs the /project-init command (global or per project)
 init.md                            the procedure the agent follows (short)
 templates/                         every file the agent copies, mirroring target paths
   AGENTS.md, CLAUDE.md, pointer.md, gitignore.append
