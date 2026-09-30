@@ -13,7 +13,7 @@ The single rulebook for every person and every AI tool in this repo. Other AI co
 ## Where things live (read the relevant one before you act)
 | Need | Where |
 |---|---|
-| What is planned, who owns it, how far, reviewed or not | `.agents/plan.csv` (source of truth for tasks) |
+| What is planned, who owns it, how far, reviewed or not | `plan.csv` (source of truth for tasks) |
 | Why the system is the way it is | `.agents/adr/` (one accepted ADR per topic) |
 | Lessons, gotchas, running "why" | `.agents/wiki/` |
 | Who is who | `.agents/roles.md` |

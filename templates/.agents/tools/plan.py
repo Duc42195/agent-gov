@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read and update .agents/plan.csv. Python standard library only.
+"""Read and update plan.csv. Python standard library only.
 
   plan.py list [--owner NAME] [--status STATUS]
   plan.py add ID "Title" [--owner NAME]
@@ -13,7 +13,9 @@ import shutil
 import sys
 from pathlib import Path
 
-PLAN = Path(__file__).resolve().parent.parent / "plan.csv"
+ROOT = Path(__file__).resolve().parents[2]  # <root>/.agents/tools/plan.py
+PLAN = ROOT / "plan.csv"
+BACKUP = ROOT / ".agents" / "plan.csv.bak"
 COLS = ["id", "title", "owner", "status", "estimate", "start", "end",
         "dod", "mr", "reviewer", "review", "updated", "notes"]
 STATUS = ("todo", "in-progress", "done")
@@ -32,7 +34,7 @@ def load():
 
 
 def save(rows):
-    shutil.copy2(PLAN, PLAN.with_name(PLAN.name + ".bak"))
+    shutil.copy2(PLAN, BACKUP)
     with PLAN.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=COLS, extrasaction="ignore", restval="")
         writer.writeheader()

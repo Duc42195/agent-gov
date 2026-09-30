@@ -14,7 +14,7 @@ Four axes:
 
 | Axis | What | Files |
 |---|---|---|
-| 1. Context | what everyone must know | `AGENTS.md`, `.agents/adr/`, `.agents/wiki/`, `.agents/plan.csv` |
+| 1. Context | what everyone must know | `AGENTS.md`, `plan.csv`, `.agents/adr/`, `.agents/wiki/` |
 | 2. Action | how work gets closed | `/done <task-id>` command |
 | 3. External | sync with trackers / git host | `.agents/tools/sync_plan.py` |
 | 4. Team | who does what, how far, is it right | `.agents/roles.md` + columns in `plan.csv` |
@@ -29,7 +29,7 @@ All file contents live in `templates/`, mirroring the target paths. Find that fo
 
 Learn from the repo before asking:
 - Git repo? Which host (`git remote -v`)? Default branch?
-- A `plan.csv` at the project root (or elsewhere) from an older setup: keep it, and when writing `.agents/plan.csv` migrate its rows into the new columns instead of discarding them.
+- A `plan.csv` from an older setup (at the root or elsewhere): keep its rows. Migrate them in place into the new columns (header in `templates/plan.csv`), moving it to the project root if needed; never discard rows.
 - Existing `README*`, `AGENTS.md`, `CLAUDE.md`, `.agents/`, `plan.csv`, `docs/adr/`, notes.
 - Code or docs only? Check manifests (`pyproject.toml`, `package.json`, `go.mod`, ...). Docs-only means no gate command.
 - Gate command: test/lint from the manifest, `Makefile` or CI config.
@@ -73,7 +73,7 @@ Copy, replacing every `{{PLACEHOLDER}}` (no braces left behind), never overwriti
 | `pointer.md` | each other AI tool's own config location | Only for tools that do not read `AGENTS.md` natively, e.g. `.cursor/rules/agents.mdc`, `.github/copilot-instructions.md`. |
 | `gitignore.append` | `.gitignore` | Append missing lines; create if needed. |
 | `.agents/roles.md` | same | Fill the table from Step 2. |
-| `.agents/plan.csv` | same | Add rows for tasks the user named, else keep the example and say so. |
+| `plan.csv` | `plan.csv` (project root) | Add rows for tasks the user named, else keep the example and say so. If one exists, migrate it, do not replace it. |
 | `.agents/adr/*` | same | Includes index README and template. |
 | `.agents/wiki/*` | same | Four append-only logs. |
 | `.agents/tools/*.py` | same | `sync_plan.py`: set `BACKEND`, and implement only the chosen tracker's function. |

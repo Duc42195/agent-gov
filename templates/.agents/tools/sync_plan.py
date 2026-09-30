@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync .agents/plan.csv with an external tracker.
+"""Sync plan.csv with an external tracker.
 
 plan.csv is the source of truth. `push` sends it out; `pull` brings external
 changes in. On conflict, plan.csv wins. Keep credentials in environment

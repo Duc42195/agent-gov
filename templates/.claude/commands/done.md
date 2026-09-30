@@ -5,7 +5,7 @@ allowed-tools: Bash, Read, Edit
 ---
 Finish task `$ARGUMENTS`. Stop at the first step that fails and report it. Never merge.
 
-1. Read `.agents/plan.csv` and confirm a row with id `$ARGUMENTS` exists. If not, stop.
+1. Read `plan.csv` and confirm a row with id `$ARGUMENTS` exists. If not, stop.
 2. Run `{{GATE_CMD}}`. If it fails, stop and show the failure. Do not commit.
 3. Make sure the branch is `<type>/$ARGUMENTS-<slug>`; if you are on `{{DEFAULT_BRANCH}}`, create it. Commit this task's changes as `type(scope): subject ($ARGUMENTS)`, imperative and lowercase.
 4. Push the branch and open the MR/PR with the commit subject as title and `$ARGUMENTS` in the body (`gh pr create` for GitHub, `glab mr create` for GitLab).

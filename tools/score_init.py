@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 REQUIRED = [
-    "AGENTS.md", "CLAUDE.md", ".agents/roles.md", ".agents/plan.csv",
+    "AGENTS.md", "CLAUDE.md", ".agents/roles.md", "plan.csv",
     ".agents/adr/README.md", ".agents/adr/0000-template.md",
     ".agents/wiki/decisions-log.md", ".agents/wiki/learnings.md",
     ".agents/wiki/open-questions.md", ".agents/wiki/working-process.md",
@@ -65,7 +65,7 @@ def checks(root):
     if research and research.group(1).lower() == "no":
         add("non-research: Results rule removed", "Run of record" not in agents)
 
-    plan = read(root, ".agents/plan.csv")
+    plan = read(root, "plan.csv")
     rows = list(csv.DictReader(plan.splitlines())) if plan else []
     add("plan.csv header exact", plan.splitlines()[:1] == [HEADER])
     add("plan.csv has >= 1 task", len(rows) >= 1)

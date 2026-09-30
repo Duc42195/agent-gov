@@ -6,7 +6,7 @@ The agent reads what already exists, asks about the system, the goal, the stack 
 
 | Axis | What you get |
 |---|---|
-| 1. Context | `AGENTS.md` (one rulebook), `.agents/adr/` (one accepted decision per topic), `.agents/wiki/` (lessons that accumulate), `.agents/plan.csv` (the plan) |
+| 1. Context | `AGENTS.md` (one rulebook), `.agents/adr/` (one accepted decision per topic), `.agents/wiki/` (lessons that accumulate), `plan.csv` (the plan) |
 | 2. Action | `/done <task-id>`: gate, commit, open MR/PR, flip status in `plan.csv`. Never merges. |
 | 3. External | `.agents/tools/sync_plan.py`: stub adapter to mirror `plan.csv` to Jira / Google Sheets / Excel |
 | 4. Team | `.agents/roles.md` plus the `owner`, `status`, `mr`, `reviewer`, `review` columns of `plan.csv`: who does what, how far, is it right |
@@ -67,7 +67,8 @@ install.sh                         installs the /project-init command (global or
 init.md                            the procedure the agent follows (short)
 templates/                         every file the agent copies, mirroring target paths
   AGENTS.md, CLAUDE.md, pointer.md, gitignore.append
-  .agents/                         roles, plan.csv, adr/, wiki/, tools/*.py
+  plan.csv                         the plan, at the project root
+  .agents/                         roles, adr/, wiki/, tools/*.py
   .claude/ .cursor/ .github/       /done command per AI tool
 tools/score_init.py                scores a scaffolded project, writes the init report
 tests/smoke_test.py                scaffolds into a temp dir and runs the checks
