@@ -1,0 +1,3 @@
+.agents/state/
+.agents/*.bak
+__pycache__/

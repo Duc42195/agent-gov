@@ -1,0 +1,88 @@
+# init.md — bootstrap agent governance for a new project
+
+**You are an AI coding agent. Follow this file step by step.** It sets up a small, shared way of working so a project with several people (and several AI tools) stays consistent: one rulebook, one task list, one decision record, one running knowledge base.
+
+Ground rules:
+- Ask the user in the language they write in.
+- Never overwrite an existing file. If a target exists, read it, keep its content, add only what is missing.
+- Ask questions once, in a single batch (use your question tool if you have one). Do not interrogate.
+- Never write secrets, tokens or passwords into any file.
+- Do not commit or push. At the end, tell the user what to commit.
+
+Four axes:
+
+| Axis | What | Files |
+|---|---|---|
+| 1. Context | what everyone must know | `AGENTS.md`, `.agents/adr/`, `.agents/wiki/`, `.agents/plan.csv` |
+| 2. Action | how work gets closed | `/done <task-id>` command |
+| 3. External | sync with trackers / git host | `.agents/tools/sync_plan.py` |
+| 4. Team | who does what, how far, is it right | `.agents/roles.md` + columns in `plan.csv` |
+
+## Where the templates are
+
+All file contents live in `templates/`, mirroring the target paths. Find that folder next to this file, or in `~/.claude/templates/templates/`. Copy files from there; do not retype them. Only read a template when you are about to create it.
+
+## Step 1 — Read what exists
+
+Learn from the repo before asking:
+- Git repo? Which host (`git remote -v`)? Default branch?
+- Existing `README*`, `AGENTS.md`, `CLAUDE.md`, `.agents/`, `plan.csv`, `docs/adr/`, notes.
+- Code or docs only? Check manifests (`pyproject.toml`, `package.json`, `go.mod`, ...). Docs-only means no gate command.
+- Gate command: test/lint from the manifest, `Makefile` or CI config.
+- Which AI tool config folders exist (`.claude/`, `.cursor/`, `.github/`).
+
+If the project has content, summarise it in a few lines and skip every question you can already answer.
+
+## Step 2 — Ask what is missing
+
+One batch, only what you could not learn. Every answer has a default, so the user may reply "defaults".
+
+**System** (always ask 1–3 unless clear from the repo)
+1. What is the project and who is it for?
+2. What does "done" look like for the whole project?
+3. Tech stack (default: detected, else "docs only").
+4. Research project (experiments, results, paper)? → `{{IS_RESEARCH}}` `yes|no` (default `no`)
+5. Task id prefix → `{{TASK_KEY}}` (default `TASK`)
+
+**Tools** (skip if solo and defaults fit)
+6. External tracker `jira|gsheet|excel|none` → `{{EXTERNAL_TRACKER}}` (default `none`)
+7. Git host GitHub/GitLab/shared drive, default branch → `{{GIT_HOST}}`, `{{DEFAULT_BRANCH}}` (default: detected, else `main`)
+8. AI tools used: Claude Code, Cursor, Copilot, other (default: detected from config folders, else Claude Code)
+
+**Team** (skip if the repo is clearly solo)
+9. Who, and which role each? Roles: `maintainer`, `dev`, `reviewer`, `qa`, `pm`, `researcher`, `writer`. One person may hold several. Solo → one row (default: the git user as `maintainer`), review needing a second person is skipped.
+
+Set `{{PROJECT_NAME}}` from the folder name unless told otherwise. Set `{{GATE_CMD}}` to the gate command, or empty for docs-only.
+
+## Step 3 — Confirm, then write
+
+Show a short profile (what/goal/stack/type/team/tools) and the file list below. Get one yes.
+
+## Step 4 — Scaffold
+
+Copy, replacing every `{{PLACEHOLDER}}` (no braces left behind), never overwriting.
+
+| Copy from `templates/` | To | Notes |
+|---|---|---|
+| `AGENTS.md` | `AGENTS.md` | Fill Profile lines `<one line>` and stack. If the file exists, merge sections in. Not research → delete the `Results:` bullet and the HTML comment above it. |
+| `CLAUDE.md` | `CLAUDE.md` | One line `@AGENTS.md`. |
+| `pointer.md` | each other AI tool's own config location | Only for tools that do not read `AGENTS.md` natively, e.g. `.cursor/rules/agents.mdc`, `.github/copilot-instructions.md`. |
+| `gitignore.append` | `.gitignore` | Append missing lines; create if needed. |
+| `.agents/roles.md` | same | Fill the table from Step 2. |
+| `.agents/plan.csv` | same | Add rows for tasks the user named, else keep the example and say so. |
+| `.agents/adr/*` | same | Includes index README and template. |
+| `.agents/wiki/*` | same | Four append-only logs. |
+| `.agents/tools/*.py` | same | `sync_plan.py`: set `BACKEND`, and implement only the chosen tracker's function. |
+| `.claude/commands/done.md` | same | Claude Code. |
+| `.cursor/commands/done.md` | same | Only if Cursor is used. |
+| `.github/prompts/done.prompt.md` | same | Only if Copilot is used. |
+
+Adapt `done.md` (any variant): docs-only → delete step 2. Not in git (shared drive) → keep only steps 1, 5, 6, 7 and put the file link in the `mr` column. Copy the `done` command only for tools in use; if the tool has no custom commands, put the steps in `AGENTS.md` instead.
+
+## Step 5 — Verify and report
+
+1. Run `python .agents/tools/check_adr.py` (must print `OK`) and `python .agents/tools/plan.py list` (must print the example row). Fix failures.
+2. `grep -rn "{{" AGENTS.md .agents .claude .cursor .github` must find nothing.
+3. Tracker not `none`: tell the user which TODO in `sync_plan.py` is left and which environment variables it needs.
+4. Tell the user in a few lines: what was created, the four axes, how to close a task (`/done <id>`), suggested first commit `chore: add agent governance scaffold`. Do not commit.
+5. Several people: each reads `AGENTS.md` and `.agents/roles.md` first; `plan.csv` shows who does what, how far, reviewed or not.
