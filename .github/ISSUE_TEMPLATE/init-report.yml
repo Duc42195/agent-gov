@@ -1,0 +1,26 @@
+name: Init report
+description: Report how /project-init went with your agent (works for any agent, good or bad)
+labels: [init-report]
+body:
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and model
+      placeholder: "e.g. Claude Code + claude-sonnet-5-5, Cursor, Codex CLI, Gemini CLI"
+    validations: {required: true}
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Outcome
+      options: ["Worked", "Worked with problems", "Did not work"]
+    validations: {required: true}
+  - type: textarea
+    id: report
+    attributes:
+      label: Contents of .agents/state/init-report.md
+      description: Paste the file. Remove anything private first.
+    validations: {required: true}
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else

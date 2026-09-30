@@ -44,6 +44,14 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 
 `/init` is a built-in Claude Code command that creates `CLAUDE.md`, so this repo uses the name `/project-init`.
 
+## Other agents, and helping improve this
+
+Only Claude Code is tested here. If you use another agent, **please [raise an issue](https://github.com/Duc42195/agent-init/issues/new?template=init-report.yml)** with how it went, good or bad.
+
+The last step of `init.md` makes the agent measure itself: `tools/score_init.py` checks the result objectively (files, leftover placeholders, tools run, profile filled, `/done` present) and writes `.agents/state/init-report.md` (git-ignored). The agent then fills a short self-report: what it could not follow, what was ambiguous, what it changed. Review that file, remove anything private, and paste it into the *Init report* issue. Nothing is sent automatically.
+
+You can also score any project yourself: `python tools/score_init.py /path/to/project --agent NAME --model NAME`.
+
 ## Working rules the scaffold enforces
 
 - `AGENTS.md` is the only rulebook. `CLAUDE.md` is one line that imports it.
@@ -61,6 +69,7 @@ templates/                         every file the agent copies, mirroring target
   AGENTS.md, CLAUDE.md, pointer.md, gitignore.append
   .agents/                         roles, plan.csv, adr/, wiki/, tools/*.py
   .claude/ .cursor/ .github/       /done command per AI tool
+tools/score_init.py                scores a scaffolded project, writes the init report
 tests/smoke_test.py                scaffolds into a temp dir and runs the checks
 .claude/commands/project-init.md   one-line command: read init.md and follow it
 ```

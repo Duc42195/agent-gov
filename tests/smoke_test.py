@@ -47,6 +47,22 @@ def main():
         if left:
             failures.append(f"placeholders left in: {left}")
 
+        # what the agent fills in by hand
+        a = tmp / "AGENTS.md"
+        a.write_text(a.read_text().replace("<one line>", "x").replace('<stack, or "docs only">', "x"))
+        r = tmp / ".agents/roles.md"
+        r.write_text(r.read_text().replace("<name>", "me").replace("<role>", "maintainer"))
+        (tmp / ".gitignore").write_text((TEMPLATES / "gitignore.append").read_text())
+        scorer = str(ROOT / "tools" / "score_init.py")
+        code, out = run(tmp, sys.executable, scorer, ".", "--agent", "t", "--write")
+        if code or not (tmp / ".agents/state/init-report.md").is_file():
+            failures.append(f"score_init on a good scaffold: {out}")
+        empty = Path(tempfile.mkdtemp())
+        code, out = run(empty, sys.executable, scorer, ".")
+        shutil.rmtree(empty, ignore_errors=True)
+        if code == 0:
+            failures.append("score_init passed on an empty dir")
+
         code, out = run(tmp, sys.executable, ".agents/tools/check_adr.py")
         if code or "OK" not in out:
             failures.append(f"check_adr on empty ADR set: {out}")

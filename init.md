@@ -8,6 +8,7 @@ Ground rules:
 - Ask questions once, in a single batch (use your question tool if you have one). Do not interrogate.
 - Never write secrets, tokens or passwords into any file.
 - Do not commit or push. At the end, tell the user what to commit.
+- When done, run Step 6. It is how this scaffold gets better.
 
 Four axes:
 
@@ -89,3 +90,9 @@ Adapt `done.md` (any variant): docs-only → delete step 2. Not in git (shared d
 3. Tracker not `none`: tell the user which TODO in `sync_plan.py` is left and which environment variables it needs.
 4. Tell the user in a few lines: what was created, the four axes, how to close a task (`/done <id>`), suggested first commit `chore: add agent governance scaffold`. Do not commit.
 5. Several people: each reads `AGENTS.md` and `.agents/roles.md` first; `plan.csv` shows who does what, how far, reviewed or not.
+
+## Step 6 — Score and report (helps improve this scaffold)
+
+1. From the project root run `python <folder-of-init.md>/tools/score_init.py . --agent "<your tool name>" --model "<your model id>" --write`. Fix any failed check you can fix, then re-run.
+2. Open `.agents/state/init-report.md` (git-ignored) and fill the **Self-report** section honestly and briefly: what did not work as written, what was ambiguous, what you changed. No secrets, no private project content.
+3. Tell the user the score and that the report can be posted as an issue at the agent-init repo ("Init report" template) to help improve it. Never post it yourself.
