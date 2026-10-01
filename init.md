@@ -33,7 +33,7 @@ Learn from the repo before asking:
 - Existing `README*`, `AGENTS.md`, `CLAUDE.md`, `.agents/`, `plan.csv`, `docs/adr/`, notes.
 - Code or docs only? Check manifests (`pyproject.toml`, `package.json`, `go.mod`, ...). Docs-only means no gate command.
 - Gate command: test/lint from the manifest, `Makefile` or CI config.
-- Which AI tool config folders exist (`.claude/`, `.cursor/`, `.github/`, `.opencode/`).
+- Which AI tool config folders exist (`.claude/`, `.cursor/`, `.github/`).
 - **Python:** run `python3 --version`, `python --version`, `py -3 --version` in that order; the first that prints 3.8 or newer is `{{PY}}` (the `/project-init` command may already name it). If none works, `{{PY}}` = `python3` and the Profile line reads `Python: python3 (NOT FOUND at init: install Python 3.8+)`: tell the user, skip every step below that runs a script (Steps 5.1, 5.4 and 6), and say so in the report.
 - **Upgrade mode:** if `.agents/init-version` exists, this project is already scaffolded. Do not re-run Steps 2–4. Compare it with `VERSION` next to this file. Same version → say so and stop. Older → read `CHANGELOG.md`, apply every `Upgrade:` line for versions after it, replace unmodified files in `.agents/tools/` with the templates (show a diff and ask for any file the project changed), never touch `plan.csv` rows, wiki, ADRs, a filled `Project checks` block in a `plan-check` command, or `AGENTS.md` content beyond the listed changes, then write the new version to `.agents/init-version`, run Step 6 and report what changed.
 
@@ -53,7 +53,7 @@ One batch, only what you could not learn. Every answer has a default, so the use
 **Tools** (skip if solo and defaults fit)
 6. External tracker `jira|gsheet|excel|none` → `{{EXTERNAL_TRACKER}}` (default `none`)
 7. Git host GitHub/GitLab/shared drive, default branch → `{{GIT_HOST}}`, `{{DEFAULT_BRANCH}}` (default: detected, else `main`)
-8. AI tools used: Claude Code, Cursor, Copilot, OpenCode, other (default: detected from config folders, else Claude Code)
+8. AI tools used: Claude Code, Cursor, Copilot, other (default: detected from config folders, else Claude Code)
 
 **Team** (skip if the repo is clearly solo)
 9. Who, and which role each? Roles: `maintainer`, `dev`, `reviewer`, `qa`, `pm`, `researcher`, `writer`. One person may hold several. Solo → one row (default: the git user as `maintainer`), review needing a second person is skipped.
@@ -86,7 +86,6 @@ Copy, replacing every `{{PLACEHOLDER}}` (no braces left behind), never overwriti
 | `.claude/commands/done.md` | same | Claude Code. |
 | `.cursor/commands/done.md` | same | Only if Cursor is used. |
 | `.github/prompts/done.prompt.md` | same | Only if Copilot is used. |
-| `.opencode/commands/done.md` | same | Only if OpenCode is used. |
 
 Only if the user said yes to question 10, also copy:
 
@@ -96,7 +95,6 @@ Only if the user said yes to question 10, also copy:
 | `.claude/commands/plan-check.md` | same | Claude Code. |
 | `.cursor/commands/plan-check.md` | same | Only if Cursor is used. |
 | `.github/prompts/plan-check.prompt.md` | same | Only if Copilot is used. |
-| `.opencode/commands/plan-check.md` | same | Only if OpenCode is used. |
 
 Then **tailor the command**: in each copied `plan-check` command replace the line `<!-- PROJECT-CHECKS -->` with 3–6 lines, one check each, derived from the profile. Each line is one read-only command (or file read) and a condition: print one short line under the report table only when it fails. Keep the script and the report table untouched. Pick from what fits this project:
 - has a gate → `{{GATE_CMD}}` passes on the base branch;
@@ -113,7 +111,7 @@ Adapt `done.md` (any variant): docs-only → delete step 2. Not in git (shared d
 ## Step 5 — Verify and report
 
 1. Run `{{PY}} .agents/tools/check_adr.py` (must print `OK`) and `{{PY}} .agents/tools/plan.py list` (must print the example row). Fix failures.
-2. `grep -rn "{{" AGENTS.md .agents .claude .cursor .github .opencode` must find nothing.
+2. `grep -rn "{{" AGENTS.md .agents .claude .cursor .github` must find nothing.
 3. Tracker not `none`: tell the user which TODO in `sync_plan.py` is left and which environment variables it needs.
 4. If `/plan-check` was installed: no `<!-- PROJECT-CHECKS -->` marker may remain, and `{{PY}} .agents/plan-check/plan_check.py --no-fetch` must print a report.
 5. Tell the user in a few lines: what was created, the four axes, how to close a task (`/done <id>`), suggested first commit `chore: add agent governance scaffold`. Do not commit.

@@ -23,7 +23,7 @@ No third-party packages. The helper scripts use only the Python standard library
 
 ## Use it
 
-`install.sh` writes the `/project-init` command for the agent(s) you name: `claude`, `cursor`, `copilot`, `codex`, `gemini`, `opencode`, `all`, or `other` (no command file; you tell the agent to read `init.md`). Without `--agent` it asks.
+`install.sh` writes the `/project-init` command for the agent(s) you name: `claude`, `cursor`, `copilot`, `codex`, `gemini`, `all`, or `other` (no command file; you tell the agent to read `init.md`). Without `--agent` it asks.
 
 **Every project, once per machine:**
 ```
@@ -46,7 +46,6 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 | copilot | not supported | `.github/prompts/` |
 | codex | `~/.codex/prompts/` | not supported |
 | gemini | `~/.gemini/commands/` | `.gemini/commands/` |
-| opencode | `~/.opencode/commands/` | `.opencode/commands/` |
 | other | no file: tell the agent "Read and follow /path/to/agent-gov/init.md" | same |
 
 **New projects from a template.** Tick *Template repository* in the GitHub settings, click *Use this template* per project; `.claude/commands/project-init.md` finds `./init.md` itself.
@@ -55,7 +54,7 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 
 **What else you get**
 
-- **`/plan-check` (standup, offered by `/project-init`, question 10).** Compares `plan.csv` with git and every MR/PR, says ON TRACK or BEHIND SCHEDULE, and shows who each task blocks, in one table. Init copies it and **tailors the command to your project**: it fills a `Project checks` block with 3–6 read-only checks that fit (gate green, result ADRs match reports, tracker drift, reviews pending, ...). The script and the table template stay fixed. `/done` and `/plan-check` come in Claude Code, Cursor, Copilot and OpenCode variants. Details: [docs/plan-check.md](docs/plan-check.md).
+- **`/plan-check` (standup, offered by `/project-init`, question 10).** Compares `plan.csv` with git and every MR/PR, says ON TRACK or BEHIND SCHEDULE, and shows who each task blocks, in one table. Init copies it and **tailors the command to your project**: it fills a `Project checks` block with 3–6 read-only checks that fit (gate green, result ADRs match reports, tracker drift, reviews pending, ...). The script and the table template stay fixed. `/done` and `/plan-check` come in Claude Code, Cursor and Copilot variants. Details: [docs/plan-check.md](docs/plan-check.md).
 - **`claude-delete-session` (Claude Code only, installed by default).** A terminal UI to find and delete old Claude Code sessions (`.jsonl` files under `~/.claude/projects`); run it as `claude-delete-session`, or `!claude-delete-session` inside Claude. A user-wide `install.sh --agent claude` copies it to `~/.local/bin` **and adds the rule `Bash(~/.local/bin/claude-delete-session)` to `~/.claude/settings.json`** so it runs without a prompt. It deletes files permanently. With `--project`, or for other agents, it is not installed. A Windows version is `tools/claude-delete-session.ps1` (not tested here, copy it yourself).
 
 ## Updates
@@ -93,7 +92,7 @@ templates/                         every file the agent copies, mirroring target
   plan.csv                         the plan, at the project root
   .agents/                         roles, adr/, wiki/, tools/*.py, init-version
   .agents/plan-check/              standup script and report templates (optional)
-  .claude/ .cursor/ .github/ .opencode/ /done and /plan-check commands per AI tool
+  .claude/ .cursor/ .github/       /done and /plan-check commands per AI tool
 docs/plan-check.md                 how /plan-check works and how to change its report
 tools/score_init.py                scores a scaffolded project, writes the init report
 tools/claude-delete-session{,.ps1} session cleaner

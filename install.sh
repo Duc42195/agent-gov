@@ -64,11 +64,11 @@ PYEOF
 
 if [ -z "$AGENTS" ]; then
   if [ -t 0 ]; then
-    read -r -p "Agent(s): claude, cursor, copilot, codex, gemini, opencode, other, all (comma separated) [claude]: " AGENTS
+    read -r -p "Agent(s): claude, cursor, copilot, codex, gemini, other, all (comma separated) [claude]: " AGENTS
   fi
   AGENTS="${AGENTS:-claude}"
 fi
-[ "$AGENTS" = "all" ] && AGENTS="claude,cursor,copilot,codex,gemini,opencode"
+[ "$AGENTS" = "all" ] && AGENTS="claude,cursor,copilot,codex,gemini"
 
 # The first Python 3.8+ among python3, python, py (override the list with AGENT_GOV_PY_CANDIDATES).
 find_python() {
@@ -140,11 +140,9 @@ $BODY" ;;
 prompt = \"\"\"
 $BODY
 \"\"\"" ;;
-    opencode)
-      write opencode "$(scope_dir .opencode/commands "$HOME/.opencode/commands")" project-init.md "$BODY" ;;
     other|"")
       echo "other agent: no command file needed. Tell it: \"Read and follow $REPO/init.md\"" ;;
-    *) echo "unknown agent: $a (claude, cursor, copilot, codex, gemini, opencode, other)" >&2; exit 2 ;;
+    *) echo "unknown agent: $a (claude, cursor, copilot, codex, gemini, other)" >&2; exit 2 ;;
   esac
 done
 if [ "$HAS_CLAUDE" = 1 ]; then
