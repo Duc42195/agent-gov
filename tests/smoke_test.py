@@ -138,10 +138,45 @@ def main():
         r = subprocess.run(chk + ["--force"], cwd=tmp, capture_output=True, text=True, env=env)
         if "up to date" not in r.stdout:
             failures.append(f"check_update same version: {r.stdout}")
+        import datetime, json
+        state = tmp / ".agents/state/update-check.json"
+
+        def age(**kw):  # pretend the last network try / notice happened this long ago
+            d = json.loads(state.read_text())
+            for k, hours in kw.items():
+                d[k] = (datetime.datetime.now() - datetime.timedelta(hours=hours)).isoformat(timespec="seconds")
+            state.write_text(json.dumps(d))
+
+        def quiet_check():
+            return subprocess.run(chk, cwd=tmp, capture_output=True, text=True, env=env)
+
+        # the bug that hid releases: a check that said "up to date" must not hide a release made right after
+        state.unlink(missing_ok=True)
+        env["AGENT_GOV_REMOTE"] = remote.as_uri()  # remote = current version
+        if quiet_check().stdout:
+            failures.append("check_update spoke while up to date")
+        (remote / "VERSION").write_text("9.9.9\n")
+        if quiet_check().stdout:
+            failures.append("check_update hit the network again inside the 1h window")
+        age(tried=2)
+        r = quiet_check()
+        if "9.9.9" not in r.stdout:
+            failures.append(f"release made after an up-to-date check not announced after 1h: {r.stdout}")
+        age(tried=2)
+        if quiet_check().stdout:
+            failures.append("same notice repeated within 24h")
+        age(tried=2, announced_at=30)
+        if "9.9.9" not in quiet_check().stdout:
+            failures.append("notice not repeated after 24h")
+        # offline: silent, and a failed try waits an hour as well
         env["AGENT_GOV_REMOTE"] = "file:///nonexistent"
-        r = subprocess.run(chk, cwd=tmp, capture_output=True, text=True, env=env)
+        age(tried=2, announced_at=30)
+        r = quiet_check()
         if r.returncode or r.stdout:
             failures.append("check_update offline not silent")
+        env["AGENT_GOV_REMOTE"] = remote.as_uri()
+        if quiet_check().stdout:
+            failures.append("failed try did not back off for an hour")
         shutil.rmtree(remote, ignore_errors=True)
 
         # ADR rules: two accepted ADRs on one topic must fail; a run-id check must catch stale numbers.

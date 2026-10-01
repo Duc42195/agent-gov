@@ -59,7 +59,7 @@ It copies the tool to `~/.local/bin` **and adds the rule `Bash(~/.local/bin/clau
 Versions are in `VERSION` and `CHANGELOG.md` (each release lists `Upgrade:` steps for existing projects).
 
 - **You installed the clone:** `/project-init` first runs `git fetch` on it and tells you if it is behind. Update with `~/.agent-gov/install.sh --update` (fast-forward only, prints what changed).
-- **A project already scaffolded:** it stores its version in `.agents/init-version`, and `AGENTS.md` tells the agent to run `.agents/tools/check_update.py` at session start. That script asks GitHub for `VERSION` at most once a week and prints nothing unless a newer version exists (then it shows the new changelog entries). It never changes files and stays silent offline. Opt out with `AGENT_GOV_NO_UPDATE_CHECK=1`. To upgrade, run `/project-init` in the project: it detects the old version, applies the `Upgrade:` steps and asks before touching files you modified.
+- **A project already scaffolded:** it stores its version in `.agents/init-version`, and `AGENTS.md` tells the agent to run `.agents/tools/check_update.py` at session start. That script asks GitHub for `VERSION` at most once an hour and prints nothing unless a newer version exists (then it shows the new changelog entries, at most once a day per version). `check_update.py --force` answers immediately. It never changes files and stays silent offline. Opt out with `AGENT_GOV_NO_UPDATE_CHECK=1`. To upgrade, run `/project-init` in the project: it detects the old version, applies the `Upgrade:` steps and asks before touching files you modified.
 
 Releasing: bump `VERSION`, add the matching top entry to `CHANGELOG.md` (the smoke test checks they agree).
 

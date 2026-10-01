@@ -3,6 +3,10 @@
 Newest first. Heading format `## X.Y.Z — YYYY-MM-DD` is read by `check_update.py`.
 Lines starting with `Upgrade:` tell an already-scaffolded project what to change by hand or by agent.
 
+## 0.3.1 — 2026-10-01
+- Fix: update notices were hidden for 7 days after any check, even a check that said "up to date", so a release made right after was missed. `check_update.py` now asks at most once an hour (a failed try also waits an hour), repeats the same notice at most once a day, and keeps its state in `.agents/state/update-check.json`.
+- Upgrade: replace `.agents/tools/check_update.py` with the template version (this is the fix). Delete the old `.agents/state/update-check` file.
+
 ## 0.3.0 — 2026-10-01
 - Renamed agent-init to agent-gov: repo, URLs, default clone folder `~/.agent-gov`, env vars `AGENT_INIT_*` became `AGENT_GOV_*` (`AGENT_GOV_NO_UPDATE_CHECK`, `AGENT_GOV_REMOTE`).
 - `/plan-check` standup command (optional, question 10 in `init.md`): plan vs git vs MR/PR, who blocks whom. Init tailors its `Project checks` block to the project. Docs in `docs/plan-check.md`.
