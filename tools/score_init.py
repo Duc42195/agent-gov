@@ -24,7 +24,9 @@ REQUIRED = [
 ]
 DONE_CMDS = [".claude/commands/done.md", ".cursor/commands/done.md",
              ".github/prompts/done.prompt.md"]
-HEADER = "id,title,owner,status,estimate,start,end,dod,mr,reviewer,review,updated,notes"
+PLAN_CHECK_CMDS = [".claude/commands/plan-check.md", ".cursor/commands/plan-check.md",
+                   ".github/prompts/plan-check.prompt.md"]
+HEADER = "id,title,owner,status,estimate,start,end,dod,mr,reviewer,review,updated,depends,adr,notes"
 GITIGNORE = [".agents/state/", ".agents/*.bak", "__pycache__/"]
 
 
@@ -51,7 +53,7 @@ def checks(root):
     for d in ("AGENTS.md", ".agents", ".claude", ".cursor", ".github"):
         p = root / d
         for f in ([p] if p.is_file() else sorted(p.rglob("*")) if p.exists() else []):
-            if f.is_file() and f.suffix in {".md", ".py", ".csv", ".toml"} and "{{" in read(root, f.relative_to(root)):
+            if f.is_file() and "state" not in f.relative_to(root).parts and f.suffix in {".md", ".py", ".csv", ".toml"} and "{{" in read(root, f.relative_to(root)):
                 left.append(str(f.relative_to(root)))
     add("no {{placeholder}} left", not left, ", ".join(left))
 
@@ -91,6 +93,15 @@ def checks(root):
         f"AGENTS.md={tracker and tracker.group(1)} sync_plan={backend and backend.group(1)}")
 
     add("a /done command exists", any((root / c).is_file() for c in DONE_CMDS))
+
+    if (root / ".agents/plan-check").is_dir():
+        cmds = [root / c for c in PLAN_CHECK_CMDS if (root / c).is_file()]
+        add("a /plan-check command exists", bool(cmds))
+        bad = [str(c.relative_to(root)) for c in cmds
+               if "<!-- PROJECT-CHECKS -->" in c.read_text(encoding="utf-8") or "{{" in c.read_text(encoding="utf-8")]
+        add("plan-check Project checks filled", not bad, "unfilled: " + ", ".join(bad))
+        code, msg = run(root, ".agents/plan-check/plan_check.py", "--no-fetch")
+        add("plan_check.py prints a report", code == 0 and "| ID |" in msg, msg[-200:])
     return out
 
 

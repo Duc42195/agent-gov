@@ -5,6 +5,7 @@
   plan.py add ID "Title" [--owner NAME]
   plan.py set-status ID todo|in-progress|done [--mr URL]
   plan.py set-review ID pending|approved|changes [--reviewer NAME]
+  plan.py set-deps ID [--depends "ID;ID"] [--adr "NNNN;NNNN"]
 """
 import argparse
 import csv
@@ -17,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]  # <root>/.agents/tools/plan.py
 PLAN = ROOT / "plan.csv"
 BACKUP = ROOT / ".agents" / "plan.csv.bak"
 COLS = ["id", "title", "owner", "status", "estimate", "start", "end",
-        "dod", "mr", "reviewer", "review", "updated", "notes"]
+        "dod", "mr", "reviewer", "review", "updated", "depends", "adr", "notes"]
 STATUS = ("todo", "in-progress", "done")
 REVIEW = ("pending", "approved", "changes")
 
@@ -96,6 +97,22 @@ def cmd_set_review(args):
     save(rows)
 
 
+def cmd_set_deps(args):
+    rows = load()
+    row = find(rows, args.id)
+    if args.depends is not None:
+        known = {r["id"] for r in rows}
+        unknown = [d.strip() for d in args.depends.replace(",", ";").split(";")
+                   if d.strip() and d.strip() not in known]
+        if unknown:
+            sys.exit(f"unknown task id in --depends: {', '.join(unknown)}")
+        row["depends"] = args.depends
+    if args.adr is not None:
+        row["adr"] = args.adr
+    row["updated"] = today()
+    save(rows)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -122,6 +139,12 @@ def main():
     p.add_argument("review", choices=REVIEW)
     p.add_argument("--reviewer", default="")
     p.set_defaults(fn=cmd_set_review)
+
+    p = sub.add_parser("set-deps")
+    p.add_argument("id")
+    p.add_argument("--depends")
+    p.add_argument("--adr")
+    p.set_defaults(fn=cmd_set_deps)
 
     args = parser.parse_args()
     args.fn(args)

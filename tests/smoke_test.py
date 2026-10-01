@@ -50,6 +50,9 @@ def main():
             failures.append(f"placeholders left in: {left}")
 
         # what the agent fills in by hand
+        for c in (".claude/commands/plan-check.md", ".cursor/commands/plan-check.md", ".github/prompts/plan-check.prompt.md"):
+            f = tmp / c
+            f.write_text(f.read_text().replace("<!-- PROJECT-CHECKS -->", "- gate passes"))
         a = tmp / "AGENTS.md"
         a.write_text(a.read_text().replace("<one line>", "x").replace('<stack, or "docs only">', "x"))
         r = tmp / ".agents/roles.md"
@@ -87,8 +90,39 @@ def main():
         if code:
             failures.append(f"sync_plan push (none): {out}")
 
+        # plan.csv deps, plan-check on a real git repo
+        code, out = run(tmp, sys.executable, ".agents/tools/plan.py", "set-deps", "DEMO-1", "--depends", "NOPE-9")
+        if code == 0:
+            failures.append("set-deps accepted an unknown id")
+        code, out = run(tmp, sys.executable, ".agents/tools/plan.py", "set-deps", "DEMO-1", "--depends", "DEMO-1", "--adr", "0003")
+        if code or "0003" not in (tmp / "plan.csv").read_text():
+            failures.append(f"set-deps: {out}")
+        pc = tmp / "plan.csv"
+        pc.write_text("id,title,owner,status,estimate,start,end,dod,mr,reviewer,review,updated,depends,adr,notes\n"
+                      "DEMO-1,t,me,in-progress,1d,2020-01-01,2020-01-02,d,,,,,,,\n")
+        for g in (("init", "-q", "-b", "main"), ("add", "-A"), ("commit", "-qm", "init")):
+            subprocess.run(["git", *g], cwd=tmp, capture_output=True,
+                           env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                                    GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
+        code, out = run(tmp, sys.executable, ".agents/plan-check/plan_check.py", "--no-fetch", "--date", "2026-01-01")
+        if code or "| ID |" not in out or "BEHIND" not in out:
+            failures.append(f"plan_check late task: {out}")
+        code, out = run(tmp, sys.executable, ".agents/plan-check/plan_check.py", "--no-fetch", "--lang", "vi")
+        if code or "| ID |" not in out:
+            failures.append(f"plan_check vi: {out}")
+        # an unfilled marker must be noticed by the scorer
+        f = tmp / ".claude/commands/plan-check.md"
+        good = f.read_text()
+        f.write_text(good + "\n<!-- PROJECT-CHECKS -->\n")
+        code, out = run(tmp, sys.executable, scorer, ".")
+        if code == 0 or "Project checks filled" not in out or "[ ] plan-check Project checks" not in out:
+            failures.append(f"scorer missed the unfilled PROJECT-CHECKS marker: {out}")
+        f.write_text(good)
+        code, out = run(tmp, sys.executable, scorer, ".")
+        if code:
+            failures.append(f"scorer on a filled plan-check: {out}")
+
         # update notice: newer remote -> message with changelog; same -> silent; throttled -> silent
-        import os
         remote = Path(tempfile.mkdtemp())
         (remote / "VERSION").write_text("9.9.9\n")
         (remote / "CHANGELOG.md").write_text("# c\n\n## 9.9.9 — 2030-01-01\n- Upgrade: do x\n\n## 0.0.1 — old\n- y\n")
@@ -159,6 +193,34 @@ def main():
     if "9.0.0" not in r.stdout or "new thing" not in r.stdout:
         failures.append(f"install --update when behind: {r.stdout}{r.stderr}")
     shutil.rmtree(base, ignore_errors=True)
+
+    # delete-session: compiles, installs, keeps settings, idempotent
+    src = ROOT / "tools/claude-delete-session"
+    compile(src.read_text(encoding="utf-8"), str(src), "exec")
+    home = Path(tempfile.mkdtemp())
+    (home / ".claude").mkdir()
+    (home / ".claude/settings.json").write_text('{"model": "x", "permissions": {"allow": ["Bash(ls)"]}}')
+    for _ in range(2):
+        r = subprocess.run(["bash", str(ROOT / "install.sh"), "--with", "delete-session"],
+                           capture_output=True, text=True, env=dict(os.environ, HOME=str(home)))
+    import json
+    cfg = json.loads((home / ".claude/settings.json").read_text())
+    rule = "Bash(~/.local/bin/claude-delete-session)"
+    if r.returncode or not (home / ".local/bin/claude-delete-session").is_file():
+        failures.append(f"install --with delete-session: {r.stdout}{r.stderr}")
+    if cfg.get("model") != "x" or cfg["permissions"]["allow"] != ["Bash(ls)", rule]:
+        failures.append(f"settings.json not preserved or rule duplicated: {cfg}")
+    shutil.rmtree(home, ignore_errors=True)
+
+    # no leftovers of the old name outside the changelog
+    for f in list(ROOT.rglob("*")):
+        if f.is_file() and ".git" not in f.parts and "__pycache__" not in f.parts and f.name not in ("CHANGELOG.md", "smoke_test.py"):
+            try:
+                txt = f.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            if re.search(r"agent-init|AGENT_INIT", txt):
+                failures.append(f"old name agent-init left in {f.relative_to(ROOT)}")
 
     # init.md must reference only templates that exist.
     init = (ROOT / "init.md").read_text()

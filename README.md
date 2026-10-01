@@ -7,9 +7,9 @@ The agent reads what already exists, asks about the system, the goal, the stack 
 | Axis | What you get |
 |---|---|
 | 1. Context | `AGENTS.md` (one rulebook), `.agents/adr/` (one accepted decision per topic), `.agents/wiki/` (lessons that accumulate), `plan.csv` (the plan) |
-| 2. Action | `/done <task-id>`: gate, commit, open MR/PR, flip status in `plan.csv`. Never merges. |
+| 2. Action | `/done <task-id>`: gate, commit, open MR/PR, flip status in `plan.csv`. Never merges.<br>Optional `/plan-check`: standup report, see [docs/plan-check.md](docs/plan-check.md). |
 | 3. External | `.agents/tools/sync_plan.py`: stub adapter to mirror `plan.csv` to Jira / Google Sheets / Excel |
-| 4. Team | `.agents/roles.md` plus the `owner`, `status`, `mr`, `reviewer`, `review` columns of `plan.csv`: who does what, how far, is it right |
+| 4. Team | `.agents/roles.md` plus the `owner`, `status`, `mr`, `reviewer`, `review`, `depends`, `adr` columns of `plan.csv`: who does what, how far, is it right, who blocks whom |
 
 No third-party packages. The helper scripts use only the Python standard library.
 
@@ -43,6 +43,16 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 `/done` variants for Cursor and Copilot are in `templates/`.
 
 `/init` is a built-in Claude Code command that creates `CLAUDE.md`, so this repo uses the name `/project-init`.
+
+## Optional pieces
+
+**`/plan-check` (standup).** Compares `plan.csv` with git and every MR/PR, says ON TRACK or BEHIND SCHEDULE, and shows who each task blocks, in one table. `/project-init` offers it (question 10), copies it, and **tailors the command to your project**: it fills a `Project checks` block with 3–6 read-only checks that fit (gate green, result ADRs match reports, tracker drift, reviews pending, ...). The script and the table template stay fixed. Details: [docs/plan-check.md](docs/plan-check.md).
+
+**`claude-delete-session` (Claude Code only).** A terminal UI to find and delete old Claude Code sessions (`.jsonl` files under `~/.claude/projects`).
+```
+~/.agent-gov/install.sh --with delete-session
+```
+It copies the tool to `~/.local/bin` **and adds the rule `Bash(~/.local/bin/claude-delete-session)` to `~/.claude/settings.json`** so `!claude-delete-session` runs without a prompt. It deletes files permanently. A Windows version is `tools/claude-delete-session.ps1` (not tested here, copy it yourself).
 
 ## Updates
 
@@ -79,14 +89,17 @@ templates/                         every file the agent copies, mirroring target
   AGENTS.md, CLAUDE.md, pointer.md, gitignore.append
   plan.csv                         the plan, at the project root
   .agents/                         roles, adr/, wiki/, tools/*.py (incl. check_update.py), init-version
-  .claude/ .cursor/ .github/       /done command per AI tool
+  .agents/plan-check/              standup script and report templates (optional)
+  .claude/ .cursor/ .github/       /done and /plan-check commands per AI tool
+docs/plan-check.md                 how /plan-check works and how to change its report
 tools/score_init.py                scores a scaffolded project, writes the init report
+tools/claude-delete-session{,.ps1} session cleaner, installed with `install.sh --with delete-session`
 tests/smoke_test.py                scaffolds into a temp dir and runs the checks
 .claude/commands/project-init.md   one-line command: read init.md and follow it
 ```
 
 ## Test
 
-`python tests/smoke_test.py` scaffolds the templates into an empty folder, runs `plan.py`, `sync_plan.py` and `check_adr.py` (including duplicate-topic and stale run-id detection) and fails on leftover placeholders. Run it after every change to `templates/`.
+`python tests/smoke_test.py` scaffolds the templates into an empty folder, runs `plan.py` (including `set-deps`), `sync_plan.py`, `check_adr.py` (duplicate-topic and stale run-id detection) and `plan_check.py` on a throwaway git repo, tests `install.sh --update` and `--with delete-session`, and fails on leftover placeholders or the old name. Run it after every change to `templates/`.
 
 Every question in `init.md` has a default, so the user can answer "defaults" for a quick setup.

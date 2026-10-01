@@ -1,0 +1,280 @@
+#!/usr/bin/env python3
+"""
+claude-delete-session — Interactive Claude Code session manager (Linux/macOS)
+
+  ↑↓ / PgUp/PgDn  Navigate
+  Type             Filter/search
+  SPACE            Toggle preview pane
+  TAB              Mark for multi-delete
+  ENTER            Delete (marked, or current if none marked)
+  ESC / q          Cancel
+
+No external dependencies — Python stdlib only (curses).
+Run directly or via: !~/.local/bin/claude-delete-session
+"""
+import curses
+import json
+import re
+import sys
+from datetime import datetime
+from pathlib import Path
+
+PROJECTS = Path.home() / ".claude" / "projects"
+
+
+# ── helpers ────────────────────────────────────────────────────────────────
+
+def shorten_project(name: str) -> str:
+    s = re.sub(r"^-home-[^-]+-", "~/", name).replace("-", "/")
+    return ("…" + s[-27:]) if len(s) > 30 else s
+
+
+def get_title(path: Path) -> str:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i > 80:
+                    break
+                try:
+                    o = json.loads(line)
+                    for k in ("leafSummary", "summary", "title", "sessionTitle"):
+                        v = o.get(k, "")
+                        if isinstance(v, str) and v.strip():
+                            return v.strip()[:100]
+                    if o.get("type") == "user":
+                        c = o.get("message", {}).get("content", "")
+                        t = (
+                            " ".join(x.get("text", "") for x in c if isinstance(x, dict))
+                            if isinstance(c, list)
+                            else str(c)
+                        )
+                        t = t.strip().replace("\n", " ")
+                        if t:
+                            return t[:100]
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return ""
+
+
+def get_sessions() -> list[dict]:
+    rows = []
+    for f in PROJECTS.rglob("*.jsonl"):
+        if not f.is_file():
+            continue
+        st = f.stat()
+        rows.append(
+            dict(
+                id=f.stem,
+                proj=shorten_project(f.parent.name),
+                file=f,
+                mtime=st.st_mtime,
+                title=get_title(f),
+            )
+        )
+    return sorted(rows, key=lambda x: x["mtime"], reverse=True)
+
+
+def get_preview(path: Path) -> list[str]:
+    lines = [f"File : {path}", f"Size : {path.stat().st_size // 1024} KB", ""]
+    n = 0
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if n >= 30:
+                    break
+                try:
+                    o = json.loads(line)
+                    tp = o.get("type", "")
+                    if tp not in ("user", "assistant"):
+                        continue
+                    c = o.get("message", {}).get("content", "")
+                    t = (
+                        " ".join(x.get("text", "") for x in c if isinstance(x, dict))
+                        if isinstance(c, list)
+                        else str(c)
+                    )
+                    t = t.strip().replace("\n", " ")
+                    if t:
+                        lines.append(("▶ " if tp == "user" else "  ") + t[:300])
+                        n += 1
+                except Exception:
+                    pass
+    except Exception as e:
+        lines.append(f"Error: {e}")
+    return lines or ["(empty)"]
+
+
+# ── TUI ────────────────────────────────────────────────────────────────────
+
+def run_tui(stdscr, sessions: list[dict]) -> list[dict]:
+    curses.curs_set(0)
+    curses.use_default_colors()
+    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)  # selected row
+    curses.init_pair(2, curses.COLOR_YELLOW, -1)                 # marked row
+    curses.init_pair(3, curses.COLOR_CYAN, -1)                   # header / footer
+
+    cur = 0
+    offset = 0
+    search = ""
+    marked: set[str] = set()
+    show_prev = False
+    plines: list[str] = []
+    prev_id: str | None = None
+
+    while True:
+        stdscr.erase()
+        H, W = stdscr.getmaxyx()
+        bh = H - 3  # body height (rows available for list)
+
+        q = search.lower()
+        fil = (
+            [s for s in sessions if q in (s["title"] + s["proj"] + s["id"]).lower()]
+            if q
+            else sessions
+        )
+        if cur >= len(fil):
+            cur = max(0, len(fil) - 1)
+
+        lw = W // 2 if (show_prev and fil) else W
+        pw = W - lw - 1
+
+        # header
+        hdr = (
+            f"  claude-delete-session  {len(fil)} session(s)"
+            + (f"  {len(marked)} marked" if marked else "")
+        )
+        stdscr.attron(curses.color_pair(3))
+        stdscr.addnstr(0, 0, hdr.ljust(W), W)
+        stdscr.attroff(curses.color_pair(3))
+
+        # scroll
+        if offset > cur:
+            offset = cur
+        elif cur >= offset + bh:
+            offset = cur - bh + 1
+
+        # list rows
+        for i, s in enumerate(fil[offset : offset + bh]):
+            y = i + 1
+            idx = i + offset
+            dot = "●" if s["id"] in marked else " "
+            ds = datetime.fromtimestamp(s["mtime"]).strftime("%m-%d %H:%M")
+            row = f"{dot} {ds}  {s['proj']:<18}  {s['title'] or '(no title)'}"
+            try:
+                if idx == cur:
+                    stdscr.attron(curses.color_pair(1))
+                    stdscr.addnstr(y, 0, row.ljust(lw), lw)
+                    stdscr.attroff(curses.color_pair(1))
+                elif s["id"] in marked:
+                    stdscr.attron(curses.color_pair(2))
+                    stdscr.addnstr(y, 0, row, lw)
+                    stdscr.attroff(curses.color_pair(2))
+                else:
+                    stdscr.addnstr(y, 0, row, lw)
+            except curses.error:
+                pass
+
+        # preview pane
+        if show_prev and fil:
+            for y in range(1, H - 2):
+                try:
+                    stdscr.addch(y, lw, "│")
+                except curses.error:
+                    pass
+            cs = fil[cur]
+            if cs["id"] != prev_id:
+                plines = get_preview(cs["file"])
+                prev_id = cs["id"]
+            for i, pl in enumerate(plines[:bh]):
+                try:
+                    stdscr.addnstr(i + 1, lw + 1, pl, pw)
+                except curses.error:
+                    pass
+
+        # search bar
+        stdscr.addnstr(H - 2, 0, f"  Search: {search}_".ljust(W), W)
+
+        # footer
+        foot = "  ↑↓=move  TAB=mark  ENTER=delete  SPACE=preview  ESC=quit"
+        stdscr.attron(curses.color_pair(3))
+        stdscr.addnstr(H - 1, 0, foot.ljust(W), W)
+        stdscr.attroff(curses.color_pair(3))
+
+        stdscr.refresh()
+
+        try:
+            k = stdscr.getch()
+        except KeyboardInterrupt:
+            return []
+
+        if k in (27, ord("q")):
+            return []
+        elif k == curses.KEY_UP:
+            cur = max(0, cur - 1)
+        elif k == curses.KEY_DOWN:
+            cur = min(len(fil) - 1, cur + 1)
+        elif k == curses.KEY_PPAGE:
+            cur = max(0, cur - bh)
+        elif k == curses.KEY_NPAGE:
+            cur = min(len(fil) - 1, cur + bh)
+        elif k == ord(" "):
+            show_prev = not show_prev
+        elif k == ord("\t"):
+            if fil:
+                sid = fil[cur]["id"]
+                if sid in marked:
+                    marked.discard(sid)
+                else:
+                    marked.add(sid)
+                cur = min(len(fil) - 1, cur + 1)
+        elif k in (10, 13):  # ENTER
+            sel = [s for s in fil if s["id"] in marked] or (
+                [fil[cur]] if fil else []
+            )
+            return sel
+        elif k in (curses.KEY_BACKSPACE, 127):
+            search = search[:-1]
+            cur = 0
+        elif 33 <= k < 127:
+            search += chr(k)
+            cur = 0
+
+    return []
+
+
+# ── main ───────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    if not PROJECTS.exists():
+        print(f"Directory not found: {PROJECTS}")
+        sys.exit(1)
+
+    sessions = get_sessions()
+    if not sessions:
+        print("No sessions found in ~/.claude/projects/")
+        return
+
+    selected = curses.wrapper(run_tui, sessions)
+
+    if not selected:
+        print("Cancelled.")
+        return
+
+    print(f"\nDelete {len(selected)} session(s):")
+    for s in selected:
+        ds = datetime.fromtimestamp(s["mtime"]).strftime("%Y-%m-%d %H:%M")
+        print(f"  {ds}  {s['proj']}  {(s['title'] or '(no title)')[:60]}")
+
+    ans = input("\nConfirm [y/N]: ").strip().lower()
+    if ans == "y":
+        for s in selected:
+            s["file"].unlink(missing_ok=True)
+            print(f"  Deleted: {s['id'][:12]}…")
+    else:
+        print("Aborted.")
+
+
+if __name__ == "__main__":
+    main()
