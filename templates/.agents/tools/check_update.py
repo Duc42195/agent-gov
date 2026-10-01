@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Tell the user when a newer agent-init exists. Python standard library only.
+"""Tell the user when a newer agent-gov exists. Python standard library only.
 
   check_update.py [--force]
 
-Compares .agents/init-version with VERSION on the agent-init repo. Silent when up to
+Compares .agents/init-version with VERSION on the agent-gov repo. Silent when up to
 date, offline, or checked within the last 7 days (--force ignores the throttle and
-always answers). Never changes anything. Opt out: set AGENT_INIT_NO_UPDATE_CHECK=1.
+always answers). Never changes anything. Opt out: set AGENT_GOV_NO_UPDATE_CHECK=1.
 """
 import datetime
 import os
@@ -17,8 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL = ROOT / ".agents" / "init-version"
 STAMP = ROOT / ".agents" / "state" / "update-check"
-REMOTE = os.environ.get("AGENT_INIT_REMOTE",
-                        "https://raw.githubusercontent.com/Duc42195/agent-init/main")
+REMOTE = os.environ.get("AGENT_GOV_REMOTE",
+                        "https://raw.githubusercontent.com/Duc42195/agent-gov/main")
 EVERY_DAYS = 7
 
 
@@ -39,12 +39,12 @@ def newer_sections(changelog, current):
 
 def main():
     force = "--force" in sys.argv[1:]
-    if os.environ.get("AGENT_INIT_NO_UPDATE_CHECK"):
+    if os.environ.get("AGENT_GOV_NO_UPDATE_CHECK"):
         return
     current = ver(LOCAL.read_text() if LOCAL.is_file() else "")
     if current is None:
         if force:
-            print("no .agents/init-version: this project was not scaffolded by agent-init >= 0.2.0")
+            print("no .agents/init-version: this project was not scaffolded by agent-gov >= 0.2.0")
         return
     if not force and STAMP.is_file():
         try:
@@ -59,7 +59,7 @@ def main():
         changelog = fetch("CHANGELOG.md") if latest and latest > current else ""
     except Exception:
         if force:
-            print("could not reach the agent-init repo (offline?)")
+            print("could not reach the agent-gov repo (offline?)")
         return
     try:
         STAMP.parent.mkdir(parents=True, exist_ok=True)
@@ -68,12 +68,12 @@ def main():
         pass
     if latest and latest > current:
         cur = ".".join(map(str, current))
-        print(f"agent-init {latest_text.strip()} is available (this project: {cur}). "
+        print(f"agent-gov {latest_text.strip()} is available (this project: {cur}). "
               f"Tell the user in one line; do not upgrade without asking. "
               f"To upgrade, run /project-init (it detects the old version).\n")
         print("\n\n".join(newer_sections(changelog, current)))
     elif force:
-        print("agent-init is up to date")
+        print("agent-gov is up to date")
 
 
 if __name__ == "__main__":

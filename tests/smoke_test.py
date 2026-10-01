@@ -92,7 +92,7 @@ def main():
         remote = Path(tempfile.mkdtemp())
         (remote / "VERSION").write_text("9.9.9\n")
         (remote / "CHANGELOG.md").write_text("# c\n\n## 9.9.9 — 2030-01-01\n- Upgrade: do x\n\n## 0.0.1 — old\n- y\n")
-        env = dict(os.environ, AGENT_INIT_REMOTE=remote.as_uri())
+        env = dict(os.environ, AGENT_GOV_REMOTE=remote.as_uri())
         chk = [sys.executable, ".agents/tools/check_update.py"]
         r = subprocess.run(chk + ["--force"], cwd=tmp, capture_output=True, text=True, env=env)
         if "9.9.9" not in r.stdout or "do x" not in r.stdout or "0.0.1" in r.stdout:
@@ -104,7 +104,7 @@ def main():
         r = subprocess.run(chk + ["--force"], cwd=tmp, capture_output=True, text=True, env=env)
         if "up to date" not in r.stdout:
             failures.append(f"check_update same version: {r.stdout}")
-        env["AGENT_INIT_REMOTE"] = "file:///nonexistent"
+        env["AGENT_GOV_REMOTE"] = "file:///nonexistent"
         r = subprocess.run(chk, cwd=tmp, capture_output=True, text=True, env=env)
         if r.returncode or r.stdout:
             failures.append("check_update offline not silent")

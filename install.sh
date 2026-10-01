@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the /project-init command for one or more AI agents.
 #   install.sh [--agent claude,cursor,copilot,codex,gemini,all] [--project]
-#   install.sh --update      pull the latest agent-init (this clone) and show what changed
+#   install.sh --update      pull the latest agent-gov (this clone) and show what changed
 # No --agent: asks (or uses claude when not run in a terminal).
 # Default scope is user-wide; --project installs into the current directory.
 set -euo pipefail

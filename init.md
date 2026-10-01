@@ -21,7 +21,7 @@ Four axes:
 
 ## Where the templates are
 
-The target project is the directory Claude Code was opened in. If this file sits in a subfolder (e.g. `./agent-init/`), that folder is only the source: write into the project root, never into it.
+The target project is the directory Claude Code was opened in. If this file sits in a subfolder (e.g. `./agent-gov/`), that folder is only the source: write into the project root, never into it.
 
 All file contents live in `templates/`, mirroring the target paths. Find that folder next to this file, or in `~/.claude/templates/templates/`. Copy files from there; do not retype them. Only read a template when you are about to create it.
 
@@ -97,4 +97,4 @@ Adapt `done.md` (any variant): docs-only → delete step 2. Not in git (shared d
 
 1. From the project root run `python <folder-of-init.md>/tools/score_init.py . --agent "<your tool name>" --model "<your model id>" --write`. Fix any failed check you can fix, then re-run.
 2. Open `.agents/state/init-report.md` (git-ignored) and fill the **Self-report** section honestly and briefly: what did not work as written, what was ambiguous, what you changed. No secrets, no private project content.
-3. Tell the user the score and that the report can be posted as an issue at the agent-init repo ("Init report" template) to help improve it. Never post it yourself.
+3. Tell the user the score and that the report can be posted as an issue at the agent-gov repo ("Init report" template) to help improve it. Never post it yourself.

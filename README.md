@@ -1,4 +1,4 @@
-# agent-init
+# agent-gov
 
 One file, `init.md`, that an AI coding agent follows to set up a shared way of working in a new project. It suits projects with several people and several AI tools.
 
@@ -19,12 +19,12 @@ No third-party packages. The helper scripts use only the Python standard library
 
 **Every project, once per machine:**
 ```
-git clone https://github.com/Duc42195/agent-init.git ~/.agent-init && ~/.agent-init/install.sh --agent claude
+git clone https://github.com/Duc42195/agent-gov.git ~/.agent-gov && ~/.agent-gov/install.sh --agent claude
 ```
 
-**One project only** (run from the project root; add `agent-init/` to `.gitignore` or delete it afterwards):
+**One project only** (run from the project root; add `agent-gov/` to `.gitignore` or delete it afterwards):
 ```
-git clone https://github.com/Duc42195/agent-init.git && agent-init/install.sh --agent claude --project
+git clone https://github.com/Duc42195/agent-gov.git && agent-gov/install.sh --agent claude --project
 ```
 
 Then restart the agent and type `/project-init`. Several agents: `--agent claude,cursor`.
@@ -36,7 +36,7 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 | copilot | not supported | `.github/prompts/` |
 | codex | `~/.codex/prompts/` | not supported |
 | gemini | `~/.gemini/commands/` | `.gemini/commands/` |
-| other | no file: tell the agent "Read and follow /path/to/agent-init/init.md" | same |
+| other | no file: tell the agent "Read and follow /path/to/agent-gov/init.md" | same |
 
 **New projects from a template.** Tick *Template repository* in the GitHub settings, click *Use this template* per project; `.claude/commands/project-init.md` finds `./init.md` itself.
 
@@ -48,14 +48,14 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 
 Versions are in `VERSION` and `CHANGELOG.md` (each release lists `Upgrade:` steps for existing projects).
 
-- **You installed the clone:** `/project-init` first runs `git fetch` on it and tells you if it is behind. Update with `~/.agent-init/install.sh --update` (fast-forward only, prints what changed).
-- **A project already scaffolded:** it stores its version in `.agents/init-version`, and `AGENTS.md` tells the agent to run `.agents/tools/check_update.py` at session start. That script asks GitHub for `VERSION` at most once a week and prints nothing unless a newer version exists (then it shows the new changelog entries). It never changes files and stays silent offline. Opt out with `AGENT_INIT_NO_UPDATE_CHECK=1`. To upgrade, run `/project-init` in the project: it detects the old version, applies the `Upgrade:` steps and asks before touching files you modified.
+- **You installed the clone:** `/project-init` first runs `git fetch` on it and tells you if it is behind. Update with `~/.agent-gov/install.sh --update` (fast-forward only, prints what changed).
+- **A project already scaffolded:** it stores its version in `.agents/init-version`, and `AGENTS.md` tells the agent to run `.agents/tools/check_update.py` at session start. That script asks GitHub for `VERSION` at most once a week and prints nothing unless a newer version exists (then it shows the new changelog entries). It never changes files and stays silent offline. Opt out with `AGENT_GOV_NO_UPDATE_CHECK=1`. To upgrade, run `/project-init` in the project: it detects the old version, applies the `Upgrade:` steps and asks before touching files you modified.
 
 Releasing: bump `VERSION`, add the matching top entry to `CHANGELOG.md` (the smoke test checks they agree).
 
 ## Other agents, and helping improve this
 
-Only Claude Code is tested here. If you use another agent, **please [raise an issue](https://github.com/Duc42195/agent-init/issues/new?template=init-report.yml)** with how it went, good or bad.
+Only Claude Code is tested here. If you use another agent, **please [raise an issue](https://github.com/Duc42195/agent-gov/issues/new?template=init-report.yml)** with how it went, good or bad.
 
 The last step of `init.md` makes the agent measure itself: `tools/score_init.py` checks the result objectively (files, leftover placeholders, tools run, profile filled, `/done` present) and writes `.agents/state/init-report.md` (git-ignored). The agent then fills a short self-report: what it could not follow, what was ambiguous, what it changed. Review that file, remove anything private, and paste it into the *Init report* issue. Nothing is sent automatically.
 
