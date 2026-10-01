@@ -2,6 +2,7 @@
 
 Newest first. Heading format `## X.Y.Z — YYYY-MM-DD` is read by `check_update.py`.
 Lines starting with `Upgrade:` tell an already-scaffolded project what to change by hand or by agent.
+Version numbers follow the rule in the README ("Releasing"): patch = a fix that only replaces a script, minor = a feature or a change to files the project owns.
 
 ## 0.5.0 — 2026-10-01
 - Python detection: `install.sh` finds Python 3.8+ (`python3`, `python`, `py -3`) and writes it into the `/project-init` command, with a warning when there is none. Init records it as the `Python:` line of `AGENTS.md` and writes that interpreter into every command (`{{PY}}`), so no command says a bare `python`.

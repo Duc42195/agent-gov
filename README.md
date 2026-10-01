@@ -65,7 +65,14 @@ Versions are in `VERSION` and `CHANGELOG.md`; each release lists `Upgrade:` step
 - **A scaffolded project** stores its version in `.agents/init-version`. `AGENTS.md` tells the agent to run `.agents/tools/check_update.py` at the start of every session. The script compares that version with `VERSION` on GitHub, prints the new changelog entries when the repo is newer, and prints nothing when you are current or offline. `check_update.py --force` also says why when it cannot answer. It changes no files. Opt out with `AGENT_GOV_NO_UPDATE_CHECK=1`. To upgrade, run `/project-init` in the project: it detects the old version, applies the `Upgrade:` steps and asks before touching files you modified.
 - **Your clone of this repo:** `/project-init` first runs `git fetch` on it and tells you if it is behind. Update with `~/.agent-gov/install.sh --update` (fast-forward only, prints what changed).
 
-Releasing: bump `VERSION` and add the matching top entry to `CHANGELOG.md` (the smoke test checks they agree).
+**Releasing.** Bump `VERSION`, add the matching top entry to `CHANGELOG.md` (the smoke test checks they agree), commit, tag `vX.Y.Z`, push. Choose the number by what an existing project must do to upgrade:
+
+| Bump | When | Existing projects |
+|---|---|---|
+| patch `0.5.1` | a bug fix; behaviour otherwise unchanged | replace one script file, nothing they own |
+| minor `0.6.0` | a new feature, or a change that needs edits to files the project owns (`AGENTS.md`, `plan.csv` columns, command files) | follow the entry's `Upgrade:` lines |
+
+Docs-only changes (README, `docs/`) do not bump the version. We stay on `0.x` until the scaffold is stable; a major bump is for a change that cannot be upgraded from by the `Upgrade:` lines.
 
 ## Other agents, and helping improve this
 
