@@ -70,8 +70,27 @@ if [ -z "$AGENTS" ]; then
 fi
 [ "$AGENTS" = "all" ] && AGENTS="claude,cursor,copilot,codex,gemini"
 
+# The first Python 3.8+ among python3, python, py (override the list with AGENT_GOV_PY_CANDIDATES).
+find_python() {
+  local c cmd
+  for c in ${AGENT_GOV_PY_CANDIDATES:-python3 python py}; do
+    if [ "$c" = py ]; then cmd="py -3"; else cmd="$c"; fi
+    if $cmd -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+      echo "$cmd"; return
+    fi
+  done
+}
+PY="$(find_python)"
+if [ -n "$PY" ]; then
+  PYNOTE="Python on this machine: \`$PY\`. Use it as {{PY}} in every command you write."
+  echo "python: $PY"
+else
+  PYNOTE="Python 3.8+ was NOT found on this machine (tried python3, python, py). Tell the user to install it: the scaffold scripts need it. Use \`python3\` as {{PY}} and follow init.md for the missing-Python case."
+  echo "WARNING: Python 3.8+ not found (tried python3, python, py). Install it; /plan-check and the other scripts need it." >&2
+fi
+
 DESC="Set up the shared agent-governance scaffold (AGENTS.md, .agents/, /done) in this project"
-BODY="First run \`git -C $REPO fetch --quiet && git -C $REPO status -sb\`; if it is behind, tell the user in one line and ask to run \`$REPO/install.sh --update\` before continuing. Then read \`$REPO/init.md\` and follow it step by step. Templates are in \`$REPO/templates/\`.
+BODY="First run \`git -C $REPO fetch --quiet && git -C $REPO status -sb\`; if it is behind, tell the user in one line and ask to run \`$REPO/install.sh --update\` before continuing. Then read \`$REPO/init.md\` and follow it step by step. Templates are in \`$REPO/templates/\`. $PYNOTE
 The target is the project root, the directory this agent was opened in, never \`$REPO\` itself."
 
 # scope_dir <project-relative dir> <user-wide dir or "">  -> prints the dir, or nothing if unsupported

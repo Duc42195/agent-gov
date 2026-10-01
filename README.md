@@ -38,6 +38,8 @@ git clone https://github.com/Duc42195/agent-gov.git && agent-gov/install.sh --ag
 
 Then restart the agent and type `/project-init`. Several agents: `--agent claude,cursor`.
 
+**Python.** The scripts need Python 3.8+. `install.sh` looks for `python3`, `python`, then `py -3` and writes the one it finds into the `/project-init` command (it warns if there is none). Init confirms it, records it in the `Python:` line of `AGENTS.md`, and writes that interpreter into every command it copies, so nothing says a bare `python` your machine does not have. With no Python, `/plan-check` replies `Python 3.8+ not found` instead of failing.
+
 | Agent | User-wide | `--project` |
 |---|---|---|
 | claude | `~/.claude/commands/` | `.claude/commands/` |
@@ -71,7 +73,7 @@ Only Claude Code is tested here. If you use another agent, **please [raise an is
 
 The last step of `init.md` makes the agent measure itself: `tools/score_init.py` checks the result objectively (files, leftover placeholders, tools run, profile filled, `/done` present) and writes `.agents/state/init-report.md` (git-ignored). The agent then fills a short self-report: what it could not follow, what was ambiguous, what it changed. Review that file, remove anything private, and paste it into the *Init report* issue. Nothing is sent automatically.
 
-You can also score any project yourself: `python tools/score_init.py /path/to/project --agent NAME --model NAME`.
+You can also score any project yourself: `python3 tools/score_init.py /path/to/project --agent NAME --model NAME`.
 
 ## Files
 
@@ -94,4 +96,4 @@ tests/smoke_test.py                scaffolds into a temp dir and runs the checks
 
 ## Test
 
-`python tests/smoke_test.py` scaffolds the templates into an empty folder, runs `plan.py` (including `set-deps`), `sync_plan.py`, `check_adr.py` (duplicate-topic and stale run-id detection) and `plan_check.py` on a throwaway git repo, tests `check_update.py`, `install.sh --update` and the delete-session install, and fails on leftover placeholders or the old name. Run it after every change to `templates/`.
+`python3 tests/smoke_test.py` scaffolds the templates into an empty folder, runs `plan.py` (including `set-deps`), `sync_plan.py`, `check_adr.py` (duplicate-topic and stale run-id detection) and `plan_check.py` on a throwaway git repo, tests `check_update.py`, `install.sh --update` and the delete-session install, and fails on leftover placeholders or the old name. Run it after every change to `templates/`.

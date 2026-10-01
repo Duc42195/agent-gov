@@ -16,7 +16,7 @@ TEMPLATES = ROOT / "templates"
 VALUES = {
     "PROJECT_NAME": "demo", "IS_RESEARCH": "yes", "TASK_KEY": "DEMO",
     "GIT_HOST": "GitHub", "DEFAULT_BRANCH": "main",
-    "EXTERNAL_TRACKER": "none", "GATE_CMD": "python -m pytest",
+    "EXTERNAL_TRACKER": "none", "GATE_CMD": "python -m pytest", "PY": "python3",
 }
 
 
@@ -110,6 +110,14 @@ def main():
         code, out = run(tmp, sys.executable, ".agents/plan-check/plan_check.py", "--no-fetch", "--lang", "vi")
         if code or "| ID |" not in out:
             failures.append(f"plan_check vi: {out}")
+        # a bare `python` command when the project's interpreter is python3 must be noticed
+        g = tmp / ".claude/commands/done.md"
+        gd = g.read_text()
+        g.write_text(gd + "\nRun `python .agents/tools/plan.py list`\n")
+        code, out = run(tmp, sys.executable, scorer, ".")
+        if code == 0 or "[ ] commands use the detected Python" not in out:
+            failures.append(f"scorer missed a bare python command: {out}")
+        g.write_text(gd)
         # an unfilled marker must be noticed by the scorer
         f = tmp / ".claude/commands/plan-check.md"
         good = f.read_text()
@@ -236,6 +244,23 @@ def main():
     if r.returncode != 2:
         failures.append("the removed --with option was accepted")
     shutil.rmtree(home, ignore_errors=True)
+
+    # python detection: installer bakes the interpreter into the command, or warns when there is none
+    for cands, want_in_cmd, want_warn in (("python3", "Python on this machine: `python3`", False),
+                                          ("nope1 nope2", "Python 3.8+ was NOT found", True)):
+        h = Path(tempfile.mkdtemp())
+        r = subprocess.run(["bash", str(ROOT / "install.sh"), "--agent", "cursor"], capture_output=True, text=True,
+                           env=dict(os.environ, HOME=str(h), AGENT_GOV_PY_CANDIDATES=cands))
+        cmd = (h / ".cursor/commands/project-init.md").read_text()
+        if r.returncode or want_in_cmd not in cmd or (("WARNING" in r.stderr) != want_warn):
+            failures.append(f"python detection with candidates {cands!r}: {r.stdout}{r.stderr}")
+        shutil.rmtree(h, ignore_errors=True)
+    for c in (".claude/commands/plan-check.md", ".cursor/commands/plan-check.md", ".github/prompts/plan-check.prompt.md"):
+        if "Python 3.8+ not found" not in (TEMPLATES / c).read_text():
+            failures.append(f"{c} lacks the missing-Python reply")
+    for f in TEMPLATES.rglob("*"):
+        if f.is_file() and f.suffix == ".md" and re.search(r"(?<![\w-])python (?:\.agents/|tools/)", f.read_text()):
+            failures.append(f"bare `python` command left in template {f.relative_to(TEMPLATES)}")
 
     # no leftovers of the old name outside the changelog
     for f in list(ROOT.rglob("*")):

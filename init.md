@@ -34,6 +34,7 @@ Learn from the repo before asking:
 - Code or docs only? Check manifests (`pyproject.toml`, `package.json`, `go.mod`, ...). Docs-only means no gate command.
 - Gate command: test/lint from the manifest, `Makefile` or CI config.
 - Which AI tool config folders exist (`.claude/`, `.cursor/`, `.github/`).
+- **Python:** run `python3 --version`, `python --version`, `py -3 --version` in that order; the first that prints 3.8 or newer is `{{PY}}` (the `/project-init` command may already name it). If none works, `{{PY}}` = `python3` and the Profile line reads `Python: python3 (NOT FOUND at init: install Python 3.8+)`: tell the user, skip every step below that runs a script (Steps 5.1, 5.4 and 6), and say so in the report.
 - **Upgrade mode:** if `.agents/init-version` exists, this project is already scaffolded. Do not re-run Steps 2–4. Compare it with `VERSION` next to this file. Same version → say so and stop. Older → read `CHANGELOG.md`, apply every `Upgrade:` line for versions after it, replace unmodified files in `.agents/tools/` with the templates (show a diff and ask for any file the project changed), never touch `plan.csv` rows, wiki, ADRs, a filled `Project checks` block in a `plan-check` command, or `AGENTS.md` content beyond the listed changes, then write the new version to `.agents/init-version`, run Step 6 and report what changed.
 
 If the project has content, summarise it in a few lines and skip every question you can already answer.
@@ -60,7 +61,7 @@ One batch, only what you could not learn. Every answer has a default, so the use
 **Standup** (only if the project uses git with MR/PRs)
 10. Do you want `/plan-check`, a standup command that compares `plan.csv` with git and every MR/PR, says on or behind schedule, and shows who blocks whom? → default `no`.
 
-Set `{{PROJECT_NAME}}` from the folder name unless told otherwise. Set `{{GATE_CMD}}` to the gate command, or empty for docs-only.
+Set `{{PROJECT_NAME}}` from the folder name unless told otherwise. `{{PY}}` comes from Step 1; replace it everywhere you copy, so no command in the project says a bare `python` that this machine lacks. Set `{{GATE_CMD}}` to the gate command, or empty for docs-only.
 
 ## Step 3 — Confirm, then write
 
@@ -97,27 +98,27 @@ Only if the user said yes to question 10, also copy:
 
 Then **tailor the command**: in each copied `plan-check` command replace the line `<!-- PROJECT-CHECKS -->` with 3–6 lines, one check each, derived from the profile. Each line is one read-only command (or file read) and a condition: print one short line under the report table only when it fails. Keep the script and the report table untouched. Pick from what fits this project:
 - has a gate → `{{GATE_CMD}}` passes on the base branch;
-- research project → `python .agents/tools/check_adr.py --reports <the report/paper paths>` prints `OK`;
-- external tracker is not `none` → `python .agents/tools/sync_plan.py push` shows no drift;
+- research project → `{{PY}} .agents/tools/check_adr.py --reports <the report/paper paths>` prints `OK`;
+- external tracker is not `none` → `{{PY}} .agents/tools/sync_plan.py push` shows no drift;
 - a task is `done` but its `review` is still `pending`;
 - an ADR is `proposed` while tasks that `depends` on its task are in progress;
 - docs-only → no gate line; check instead that every `mr` link in `plan.csv` of a done task is filled.
-Add to `AGENTS.md`, under "Working rules": `9. Standup: /plan-check compares plan.csv with git and every MR/PR, says on or behind schedule, and shows who blocks whom. Record a dependency with python .agents/tools/plan.py set-deps <id> --depends "<id>;<id>".` and under "Reading the team record": `- Who blocks whom: depends and adr columns of plan.csv. /plan-check prints it.`
+Add to `AGENTS.md`, under "Working rules": `9. Standup: /plan-check compares plan.csv with git and every MR/PR, says on or behind schedule, and shows who blocks whom. Record a dependency with {{PY}} .agents/tools/plan.py set-deps <id> --depends "<id>;<id>".` and under "Reading the team record": `- Who blocks whom: depends and adr columns of plan.csv. /plan-check prints it.`
 Tell the user the report layout is in `.agents/plan-check/templates/plan-check.<lang>.md` and that a token in `PLAN_CHECK_TOKEN` (or `GITLAB_TOKEN` / `GITHUB_TOKEN`) makes MR open/closed state exact.
 
 Adapt `done.md` (any variant): docs-only → delete step 2. Not in git (shared drive) → keep only steps 1, 5, 6, 7 and put the file link in the `mr` column. Copy the `done` command only for tools in use; if the tool has no custom commands, put the steps in `AGENTS.md` instead.
 
 ## Step 5 — Verify and report
 
-1. Run `python .agents/tools/check_adr.py` (must print `OK`) and `python .agents/tools/plan.py list` (must print the example row). Fix failures.
+1. Run `{{PY}} .agents/tools/check_adr.py` (must print `OK`) and `{{PY}} .agents/tools/plan.py list` (must print the example row). Fix failures.
 2. `grep -rn "{{" AGENTS.md .agents .claude .cursor .github` must find nothing.
 3. Tracker not `none`: tell the user which TODO in `sync_plan.py` is left and which environment variables it needs.
-4. If `/plan-check` was installed: no `<!-- PROJECT-CHECKS -->` marker may remain, and `python .agents/plan-check/plan_check.py --no-fetch` must print a report.
+4. If `/plan-check` was installed: no `<!-- PROJECT-CHECKS -->` marker may remain, and `{{PY}} .agents/plan-check/plan_check.py --no-fetch` must print a report.
 5. Tell the user in a few lines: what was created, the four axes, how to close a task (`/done <id>`), suggested first commit `chore: add agent governance scaffold`. Do not commit.
 6. Several people: each reads `AGENTS.md` and `.agents/roles.md` first; `plan.csv` shows who does what, how far, reviewed or not.
 
 ## Step 6 — Score and report (helps improve this scaffold)
 
-1. From the project root run `python <folder-of-init.md>/tools/score_init.py . --agent "<your tool name>" --model "<your model id>" --write`. Fix any failed check you can fix, then re-run.
+1. From the project root run `{{PY}} <folder-of-init.md>/tools/score_init.py . --agent "<your tool name>" --model "<your model id>" --write`. Fix any failed check you can fix, then re-run.
 2. Open `.agents/state/init-report.md` (git-ignored) and fill the **Self-report** section honestly and briefly: what did not work as written, what was ambiguous, what you changed. No secrets, no private project content.
 3. Tell the user the score and that the report can be posted as an issue at the agent-gov repo ("Init report" template) to help improve it. Never post it yourself.

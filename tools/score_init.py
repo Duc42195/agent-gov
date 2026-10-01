@@ -62,6 +62,14 @@ def checks(root):
     agents = read(root, "AGENTS.md")
     add("AGENTS.md profile filled", agents and "<one line>" not in agents and "<stack" not in agents,
         "'<one line>' or '<stack' still present")
+    py = re.search(r"^- Python:\s*`?([\w ]+?)`?(?:\s|$)", agents, re.M)
+    add("AGENTS.md has a Python line", bool(py), "no '- Python:' line in the Profile")
+    if py and py.group(1) != "python":
+        bare = []
+        for f in [root / "AGENTS.md", *[root / c for c in DONE_CMDS + PLAN_CHECK_CMDS]]:
+            if f.is_file() and re.search(r"(?<![\w-])python (?:\.agents/|tools/)", f.read_text(encoding="utf-8")):
+                bare.append(str(f.relative_to(root)))
+        add("commands use the detected Python, not a bare `python`", not bare, ", ".join(bare))
     add("AGENTS.md short (<= 80 lines)", 0 < len(agents.splitlines()) <= 80,
         f"{len(agents.splitlines())} lines")
     research = re.search(r"Research project:\s*(\w+)", agents)

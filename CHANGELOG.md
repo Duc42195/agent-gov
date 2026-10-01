@@ -3,6 +3,13 @@
 Newest first. Heading format `## X.Y.Z — YYYY-MM-DD` is read by `check_update.py`.
 Lines starting with `Upgrade:` tell an already-scaffolded project what to change by hand or by agent.
 
+## 0.5.0 — 2026-10-01
+- Python detection: `install.sh` finds Python 3.8+ (`python3`, `python`, `py -3`) and writes it into the `/project-init` command, with a warning when there is none. Init records it as the `Python:` line of `AGENTS.md` and writes that interpreter into every command (`{{PY}}`), so no command says a bare `python`.
+- `/plan-check` replies `Python 3.8+ not found. Install it, then run /project-init again...` when Python is missing; `/done` falls back to editing the row by hand and says so; `AGENTS.md` rule 8 says so once.
+- `score_init.py` checks the `Python:` line and flags a bare `python` command when the project's interpreter is another one.
+- Upgrade: add `- Python: <cmd>` to the Profile of `AGENTS.md` (detect it as in `init.md`), and replace every `python .agents/...` in `AGENTS.md`, `/done`, `/plan-check` and the ADR README with `<cmd> .agents/...`.
+- Upgrade: add the missing-Python sentence to step 1 of each `plan-check` command (take it from the template); write `0.5.0` to `.agents/init-version`.
+
 ## 0.4.0 — 2026-10-01
 - `check_update.py` runs at every session start with no rate limit and no state file (the 0.3.1 hourly/daily limits are gone). It stays silent when current or offline.
 - `install.sh --agent claude` (user-wide) now installs `claude-delete-session` by default; the `--with` option is removed (it now fails with `unknown option`). `--project` and other agents do not install it.

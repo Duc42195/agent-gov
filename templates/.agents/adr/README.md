@@ -9,7 +9,7 @@ One ADR = one decision. **One topic has exactly one accepted ADR.** A later deci
 - Conditions on an acceptance are written in the ADR file, not in a chat or review thread.
 - Superseding: set the old ADR to `superseded-by NNNN`, mention the old number in the new ADR's Context, update the index below.
 - `Type: result` ADRs record the chosen outcome of an experiment (see `Run of record`).
-- Keep the index below current. `python .agents/tools/check_adr.py` checks numbering, index, topics and run-ids.
+- Keep the index below current. `{{PY}} .agents/tools/check_adr.py` checks numbering, index, topics and run-ids.
 
 ## Index
 | # | Title | Status |

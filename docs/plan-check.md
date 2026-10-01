@@ -31,7 +31,7 @@ task is done (APP-2 above).
 
 `/project-init` offers it (question 10) and copies `.agents/plan-check/` and the command for your agent. At the same time the agent fills the **Project checks** block of the command with 3-6 read-only checks that fit your project (gate green on base, result ADRs match reports, tracker drift, reviews still pending, ...). The script and the report table are never changed by that.
 
-Then type `/plan-check` (or `/plan-check <owner>`). With any other tool, or in a terminal: `python .agents/plan-check/plan_check.py`.
+Then type `/plan-check` (or `/plan-check <owner>`). With any other tool, or in a terminal: `python3 .agents/plan-check/plan_check.py` (or `python`/`py -3`, whichever your machine has). If Python is missing, the command replies `Python 3.8+ not found` and stops.
 
 Needs `git` and Python 3.8+. No packages.
 
