@@ -20,7 +20,7 @@ REQUIRED = [
     ".agents/wiki/decisions-log.md", ".agents/wiki/learnings.md",
     ".agents/wiki/open-questions.md", ".agents/wiki/working-process.md",
     ".agents/tools/plan.py", ".agents/tools/check_adr.py", ".agents/tools/sync_plan.py",
-    ".agents/tools/check_update.py", ".agents/init-version",
+    ".agents/init-version",
 ]
 DONE_CMDS = [".claude/commands/done.md", ".cursor/commands/done.md",
              ".github/prompts/done.prompt.md"]

@@ -20,7 +20,6 @@ No third-party packages. The helper scripts use only the Python standard library
 - One topic has exactly one accepted ADR; a new decision supersedes the old one instead of contradicting it. `check_adr.py` checks numbering, the index and topics.
 - For research projects, the chosen result of an experiment is an ADR with a run-id. Every table and figure in a report must match the accepted run; `check_adr.py --reports` flags the ones that do not.
 - Whatever an agent learns (decision, fixed error, open question, gotcha) is appended to the wiki in the same session.
-- At the start of every session the agent runs `check_update.py`, which tells you when a newer agent-gov exists (see [Updates](#updates)).
 
 ## Use it
 
@@ -60,10 +59,10 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 
 ## Updates
 
-Versions are in `VERSION` and `CHANGELOG.md`; each release lists `Upgrade:` steps for existing projects.
+Versions are in `VERSION` and `CHANGELOG.md`; each release lists `Upgrade:` steps for existing projects. Nothing checks for updates by itself: look at the [releases](https://github.com/Duc42195/agent-gov/releases) or the changelog when you want to know.
 
-- **A scaffolded project** stores its version in `.agents/init-version`. `AGENTS.md` tells the agent to run `.agents/tools/check_update.py` at the start of every session. The script compares that version with `VERSION` on GitHub, prints the new changelog entries when the repo is newer, and prints nothing when you are current or offline. `check_update.py --force` also says why when it cannot answer. It changes no files. Opt out with `AGENT_GOV_NO_UPDATE_CHECK=1`. To upgrade, run `/project-init` in the project: it detects the old version, applies the `Upgrade:` steps and asks before touching files you modified.
 - **Your clone of this repo:** `/project-init` first runs `git fetch` on it and tells you if it is behind. Update with `~/.agent-gov/install.sh --update` (fast-forward only, prints what changed).
+- **A scaffolded project** stores its version in `.agents/init-version`. To upgrade, run `/project-init` in it: it sees the old version, applies the `Upgrade:` lines of every newer release, and asks before touching files you modified.
 
 **Releasing.** Bump `VERSION`, add the matching top entry to `CHANGELOG.md` (the smoke test checks they agree), commit, tag `vX.Y.Z`, push. Choose the number by what an existing project must do to upgrade:
 
@@ -91,7 +90,7 @@ init.md                            the procedure the agent follows (short)
 templates/                         every file the agent copies, mirroring target paths
   AGENTS.md, CLAUDE.md, pointer.md, gitignore.append
   plan.csv                         the plan, at the project root
-  .agents/                         roles, adr/, wiki/, tools/*.py (incl. check_update.py), init-version
+  .agents/                         roles, adr/, wiki/, tools/*.py, init-version
   .agents/plan-check/              standup script and report templates (optional)
   .claude/ .cursor/ .github/       /done and /plan-check commands per AI tool
 docs/plan-check.md                 how /plan-check works and how to change its report
@@ -103,4 +102,4 @@ tests/smoke_test.py                scaffolds into a temp dir and runs the checks
 
 ## Test
 
-`python3 tests/smoke_test.py` scaffolds the templates into an empty folder, runs `plan.py` (including `set-deps`), `sync_plan.py`, `check_adr.py` (duplicate-topic and stale run-id detection) and `plan_check.py` on a throwaway git repo, tests `check_update.py`, `install.sh --update` and the delete-session install, and fails on leftover placeholders or the old name. Run it after every change to `templates/`.
+`python3 tests/smoke_test.py` scaffolds the templates into an empty folder, runs `plan.py` (including `set-deps`), `sync_plan.py`, `check_adr.py` (duplicate-topic and stale run-id detection) and `plan_check.py` on a throwaway git repo, tests `install.sh --update` and the delete-session install, and fails on leftover placeholders or the old name. Run it after every change to `templates/`.

@@ -29,7 +29,6 @@ An accepted ADR beats the wiki for formal decisions. The wiki holds the running 
 5. The gate (`{{GATE_CMD}}`) must pass before `/done` commits.
 6. Git and the MR/PR state are the truth. If `plan.csv` disagrees, fix the CSV. Never mark a task done that is not done.
 7. No secrets in the repo. Tokens live in environment variables or `.agents/state/` (git-ignored).
-8. At session start run `{{PY}} .agents/tools/check_update.py`. It prints nothing unless a newer agent-gov exists; then tell the user in one line and never upgrade without asking. If the Python command is not found, say once, in one line, that Python 3.8+ is missing and skip.
 
 ## Knowledge capture (hard rule)
 In the same session it happens, append (never delete, never rewrite history):

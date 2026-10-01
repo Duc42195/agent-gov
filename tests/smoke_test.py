@@ -130,39 +130,7 @@ def main():
         if code:
             failures.append(f"scorer on a filled plan-check: {out}")
 
-        # update check runs every session: no throttle, no state file; silent when current or offline
-        remote = Path(tempfile.mkdtemp())
-        (remote / "VERSION").write_text("9.9.9\n")
-        (remote / "CHANGELOG.md").write_text("# c\n\n## 9.9.9 — 2030-01-01\n- Upgrade: do x\n\n## 0.0.1 — old\n- y\n")
-        env = dict(os.environ, AGENT_GOV_REMOTE=remote.as_uri())
-        chk = [sys.executable, ".agents/tools/check_update.py"]
-
-        def check(*extra):
-            return subprocess.run(chk + list(extra), cwd=tmp, capture_output=True, text=True, env=env)
-
-        for n in (1, 2, 3):  # every call prints while a newer version exists
-            r = check()
-            if "9.9.9" not in r.stdout or "do x" not in r.stdout or "0.0.1" in r.stdout:
-                failures.append(f"check_update call {n} with a newer remote: {r.stdout}{r.stderr}")
-        (remote / "VERSION").write_text((ROOT / "VERSION").read_text())
-        if check().stdout:
-            failures.append("check_update spoke while up to date")
-        if "up to date" not in check("--force").stdout:
-            failures.append("check_update --force did not say up to date")
-        env["AGENT_GOV_REMOTE"] = "file:///nonexistent"
-        r = check()
-        if r.returncode or r.stdout:
-            failures.append("check_update offline not silent")
-        if "offline" not in check("--force").stdout:
-            failures.append("check_update --force did not explain being offline")
-        env["AGENT_GOV_NO_UPDATE_CHECK"] = "1"
-        env["AGENT_GOV_REMOTE"] = remote.as_uri()
-        (remote / "VERSION").write_text("9.9.9\n")
-        if check("--force").stdout:
-            failures.append("AGENT_GOV_NO_UPDATE_CHECK not honoured")
-        if list((tmp / ".agents/state").glob("update-check*")):
-            failures.append("check_update left a state file")
-        shutil.rmtree(remote, ignore_errors=True)
+        # (no update-check script any more: nothing to run here)
 
         # ADR rules: two accepted ADRs on one topic must fail; a run-id check must catch stale numbers.
         adr = tmp / ".agents/adr"

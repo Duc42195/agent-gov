@@ -81,7 +81,7 @@ Copy, replacing every `{{PLACEHOLDER}}` (no braces left behind), never overwriti
 | `plan.csv` | `plan.csv` (project root) | Add rows for tasks the user named, else keep the example and say so. If one exists, migrate it, do not replace it. Columns: `status` `todo|in-progress|done`; `review` `pending|approved|changes`; `mr` MR/PR link; `dod` definition of done; `depends` ids this task waits on, `;`-separated; `adr` ADR numbers it delivers (it blocks its dependants until they are no longer `proposed`). |
 | `.agents/adr/*` | same | Includes index README and template. |
 | `.agents/wiki/*` | same | Four append-only logs. |
-| *(the `VERSION` file next to `init.md`)* | `.agents/init-version` | Copy its content. Enables update notices. |
+| *(the `VERSION` file next to `init.md`)* | `.agents/init-version` | Copy its content. Lets `/project-init` recognise an old scaffold later and upgrade it. |
 | `.agents/tools/*.py` | same | `sync_plan.py`: set `BACKEND`, and implement only the chosen tracker's function. |
 | `.claude/commands/done.md` | same | Claude Code. |
 | `.cursor/commands/done.md` | same | Only if Cursor is used. |
@@ -103,7 +103,7 @@ Then **tailor the command**: in each copied `plan-check` command replace the lin
 - a task is `done` but its `review` is still `pending`;
 - an ADR is `proposed` while tasks that `depends` on its task are in progress;
 - docs-only → no gate line; check instead that every `mr` link in `plan.csv` of a done task is filled.
-Add to `AGENTS.md`, under "Working rules": `9. Standup: /plan-check compares plan.csv with git and every MR/PR, says on or behind schedule, and shows who blocks whom. Record a dependency with {{PY}} .agents/tools/plan.py set-deps <id> --depends "<id>;<id>".` and under "Reading the team record": `- Who blocks whom: depends and adr columns of plan.csv. /plan-check prints it.`
+Add to `AGENTS.md`, under "Working rules": `8. Standup: /plan-check compares plan.csv with git and every MR/PR, says on or behind schedule, and shows who blocks whom. Record a dependency with {{PY}} .agents/tools/plan.py set-deps <id> --depends "<id>;<id>".` and under "Reading the team record": `- Who blocks whom: depends and adr columns of plan.csv. /plan-check prints it.`
 Tell the user the report layout is in `.agents/plan-check/templates/plan-check.<lang>.md` and that a token in `PLAN_CHECK_TOKEN` (or `GITLAB_TOKEN` / `GITHUB_TOKEN`) makes MR open/closed state exact.
 
 Adapt `done.md` (any variant): docs-only → delete step 2. Not in git (shared drive) → keep only steps 1, 5, 6, 7 and put the file link in the `mr` column. Copy the `done` command only for tools in use; if the tool has no custom commands, put the steps in `AGENTS.md` instead.
