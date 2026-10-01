@@ -23,9 +23,9 @@ REQUIRED = [
     ".agents/init-version",
 ]
 DONE_CMDS = [".claude/commands/done.md", ".cursor/commands/done.md",
-             ".github/prompts/done.prompt.md"]
+             ".github/prompts/done.prompt.md", ".opencode/commands/done.md"]
 PLAN_CHECK_CMDS = [".claude/commands/plan-check.md", ".cursor/commands/plan-check.md",
-                   ".github/prompts/plan-check.prompt.md"]
+                   ".github/prompts/plan-check.prompt.md", ".opencode/commands/plan-check.md"]
 HEADER = "id,title,owner,status,estimate,start,end,dod,mr,reviewer,review,updated,depends,adr,notes"
 GITIGNORE = [".agents/state/", ".agents/*.bak", "__pycache__/"]
 
@@ -50,7 +50,7 @@ def checks(root):
     add("required files exist", not missing, "missing: " + ", ".join(missing))
 
     left = []
-    for d in ("AGENTS.md", ".agents", ".claude", ".cursor", ".github"):
+    for d in ("AGENTS.md", ".agents", ".claude", ".cursor", ".github", ".opencode"):
         p = root / d
         for f in ([p] if p.is_file() else sorted(p.rglob("*")) if p.exists() else []):
             if f.is_file() and "state" not in f.relative_to(root).parts and f.suffix in {".md", ".py", ".csv", ".toml"} and "{{" in read(root, f.relative_to(root)):

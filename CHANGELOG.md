@@ -4,6 +4,13 @@ Newest first. Heading format `## X.Y.Z — YYYY-MM-DD` is read by the upgrade mo
 Lines starting with `Upgrade:` tell an already-scaffolded project what to change by hand or by agent.
 Version numbers follow the rule in the README ("Releasing"): patch = a fix that only replaces a script, minor = a feature or a change to files the project owns.
 
+## 0.7.0 — 2026-10-01
+- Added OpenCode as a supported agent: `install.sh --agent opencode` installs `/project-init` to `~/.opencode/commands/` (user-wide) or `.opencode/commands/` (`--project`). OpenCode is included in `--all` and in the interactive prompt.
+- New templates: `templates/.opencode/commands/done.md` and `templates/.opencode/commands/plan-check.md`.
+- `init.md` question 8 now lists OpenCode; scaffold table includes `.opencode/commands/` rows.
+- `score_init.py` checks `.opencode/commands/` for `/done` and `/plan-check`.
+- Upgrade: run `install.sh --agent opencode` to add the OpenCode command to an existing install; write `0.7.0` to `.agents/init-version`.
+
 ## 0.6.0 — 2026-10-01
 - Removed the automatic update check: `.agents/tools/check_update.py` and rule 8 of `AGENTS.md` are gone (it depended on the agent choosing to run it, and did not fire reliably). Upgrading is manual: run `/project-init` in a project, or `install.sh --update` for the clone. `.agents/init-version` stays so `/project-init` can detect an old scaffold.
 - `AGENT_GOV_NO_UPDATE_CHECK` and `AGENT_GOV_REMOTE` no longer exist. The `/plan-check` rule in `init.md` is now rule 8 instead of 9.
