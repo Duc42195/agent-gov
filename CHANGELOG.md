@@ -3,6 +3,13 @@
 Newest first. Heading format `## X.Y.Z — YYYY-MM-DD` is read by `check_update.py`.
 Lines starting with `Upgrade:` tell an already-scaffolded project what to change by hand or by agent.
 
+## 0.4.0 — 2026-10-01
+- `check_update.py` runs at every session start with no rate limit and no state file (the 0.3.1 hourly/daily limits are gone). It stays silent when current or offline.
+- `install.sh --agent claude` (user-wide) now installs `claude-delete-session` by default; the `--with` option is removed (it now fails with `unknown option`). `--project` and other agents do not install it.
+- README rewritten: rules merged into the description, optional pieces merged into "Use it".
+- Upgrade: replace `.agents/tools/check_update.py` with the template version and delete `.agents/state/update-check*`.
+- Upgrade: write `0.4.0` to `.agents/init-version`.
+
 ## 0.3.1 — 2026-10-01
 - Fix: update notices were hidden for 7 days after any check, even a check that said "up to date", so a release made right after was missed. `check_update.py` now asks at most once an hour (a failed try also waits an hour), repeats the same notice at most once a day, and keeps its state in `.agents/state/update-check.json`.
 - Upgrade: replace `.agents/tools/check_update.py` with the template version (this is the fix). Delete the old `.agents/state/update-check` file.

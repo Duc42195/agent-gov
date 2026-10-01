@@ -11,7 +11,16 @@ The agent reads what already exists, asks about the system, the goal, the stack 
 | 3. External | `.agents/tools/sync_plan.py`: stub adapter to mirror `plan.csv` to Jira / Google Sheets / Excel |
 | 4. Team | `.agents/roles.md` plus the `owner`, `status`, `mr`, `reviewer`, `review`, `depends`, `adr` columns of `plan.csv`: who does what, how far, is it right, who blocks whom |
 
-No third-party packages. The helper scripts use only the Python standard library.
+No third-party packages. The helper scripts use only the Python standard library. Every question in `init.md` has a default, so you can answer "defaults" for a quick setup.
+
+**The rules the scaffold enforces**
+
+- `AGENTS.md` is the only rulebook. `CLAUDE.md` is one line that imports it.
+- `plan.csv` is the source of truth for tasks. Git and the MR/PR state are the truth for "done".
+- One topic has exactly one accepted ADR; a new decision supersedes the old one instead of contradicting it. `check_adr.py` checks numbering, the index and topics.
+- For research projects, the chosen result of an experiment is an ADR with a run-id. Every table and figure in a report must match the accepted run; `check_adr.py --reports` flags the ones that do not.
+- Whatever an agent learns (decision, fixed error, open question, gotcha) is appended to the wiki in the same session.
+- At the start of every session the agent runs `check_update.py`, which tells you when a newer agent-gov exists (see [Updates](#updates)).
 
 ## Use it
 
@@ -40,28 +49,21 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 
 **New projects from a template.** Tick *Template repository* in the GitHub settings, click *Use this template* per project; `.claude/commands/project-init.md` finds `./init.md` itself.
 
-`/done` variants for Cursor and Copilot are in `templates/`.
-
 `/init` is a built-in Claude Code command that creates `CLAUDE.md`, so this repo uses the name `/project-init`.
 
-## Optional pieces
+**What else you get**
 
-**`/plan-check` (standup).** Compares `plan.csv` with git and every MR/PR, says ON TRACK or BEHIND SCHEDULE, and shows who each task blocks, in one table. `/project-init` offers it (question 10), copies it, and **tailors the command to your project**: it fills a `Project checks` block with 3–6 read-only checks that fit (gate green, result ADRs match reports, tracker drift, reviews pending, ...). The script and the table template stay fixed. Details: [docs/plan-check.md](docs/plan-check.md).
-
-**`claude-delete-session` (Claude Code only).** A terminal UI to find and delete old Claude Code sessions (`.jsonl` files under `~/.claude/projects`).
-```
-~/.agent-gov/install.sh --with delete-session
-```
-It copies the tool to `~/.local/bin` **and adds the rule `Bash(~/.local/bin/claude-delete-session)` to `~/.claude/settings.json`** so `!claude-delete-session` runs without a prompt. It deletes files permanently. A Windows version is `tools/claude-delete-session.ps1` (not tested here, copy it yourself).
+- **`/plan-check` (standup, offered by `/project-init`, question 10).** Compares `plan.csv` with git and every MR/PR, says ON TRACK or BEHIND SCHEDULE, and shows who each task blocks, in one table. Init copies it and **tailors the command to your project**: it fills a `Project checks` block with 3–6 read-only checks that fit (gate green, result ADRs match reports, tracker drift, reviews pending, ...). The script and the table template stay fixed. `/done` and `/plan-check` come in Claude Code, Cursor and Copilot variants. Details: [docs/plan-check.md](docs/plan-check.md).
+- **`claude-delete-session` (Claude Code only, installed by default).** A terminal UI to find and delete old Claude Code sessions (`.jsonl` files under `~/.claude/projects`); run it as `claude-delete-session`, or `!claude-delete-session` inside Claude. A user-wide `install.sh --agent claude` copies it to `~/.local/bin` **and adds the rule `Bash(~/.local/bin/claude-delete-session)` to `~/.claude/settings.json`** so it runs without a prompt. It deletes files permanently. With `--project`, or for other agents, it is not installed. A Windows version is `tools/claude-delete-session.ps1` (not tested here, copy it yourself).
 
 ## Updates
 
-Versions are in `VERSION` and `CHANGELOG.md` (each release lists `Upgrade:` steps for existing projects).
+Versions are in `VERSION` and `CHANGELOG.md`; each release lists `Upgrade:` steps for existing projects.
 
-- **You installed the clone:** `/project-init` first runs `git fetch` on it and tells you if it is behind. Update with `~/.agent-gov/install.sh --update` (fast-forward only, prints what changed).
-- **A project already scaffolded:** it stores its version in `.agents/init-version`, and `AGENTS.md` tells the agent to run `.agents/tools/check_update.py` at session start. That script asks GitHub for `VERSION` at most once an hour and prints nothing unless a newer version exists (then it shows the new changelog entries, at most once a day per version). `check_update.py --force` answers immediately. It never changes files and stays silent offline. Opt out with `AGENT_GOV_NO_UPDATE_CHECK=1`. To upgrade, run `/project-init` in the project: it detects the old version, applies the `Upgrade:` steps and asks before touching files you modified.
+- **A scaffolded project** stores its version in `.agents/init-version`. `AGENTS.md` tells the agent to run `.agents/tools/check_update.py` at the start of every session. The script compares that version with `VERSION` on GitHub, prints the new changelog entries when the repo is newer, and prints nothing when you are current or offline. `check_update.py --force` also says why when it cannot answer. It changes no files. Opt out with `AGENT_GOV_NO_UPDATE_CHECK=1`. To upgrade, run `/project-init` in the project: it detects the old version, applies the `Upgrade:` steps and asks before touching files you modified.
+- **Your clone of this repo:** `/project-init` first runs `git fetch` on it and tells you if it is behind. Update with `~/.agent-gov/install.sh --update` (fast-forward only, prints what changed).
 
-Releasing: bump `VERSION`, add the matching top entry to `CHANGELOG.md` (the smoke test checks they agree).
+Releasing: bump `VERSION` and add the matching top entry to `CHANGELOG.md` (the smoke test checks they agree).
 
 ## Other agents, and helping improve this
 
@@ -71,19 +73,11 @@ The last step of `init.md` makes the agent measure itself: `tools/score_init.py`
 
 You can also score any project yourself: `python tools/score_init.py /path/to/project --agent NAME --model NAME`.
 
-## Working rules the scaffold enforces
-
-- `AGENTS.md` is the only rulebook. `CLAUDE.md` is one line that imports it.
-- `plan.csv` is the source of truth for tasks. Git and the MR/PR state are the truth for "done".
-- One topic has exactly one accepted ADR; a new decision supersedes the old one instead of contradicting it. `check_adr.py` checks numbering, the index and topics.
-- For research projects, the chosen result of an experiment is an ADR with a run-id. Every table and figure in a report must match the accepted run; `check_adr.py --reports` flags the ones that do not.
-- Whatever an agent learns (decision, fixed error, open question, gotcha) is appended to the wiki in the same session.
-
 ## Files
 
 ```
 VERSION, CHANGELOG.md              release version and upgrade notes
-install.sh                         installs the /project-init command (global or per project)
+install.sh                         installs /project-init (+ claude-delete-session for a user-wide claude install)
 init.md                            the procedure the agent follows (short)
 templates/                         every file the agent copies, mirroring target paths
   AGENTS.md, CLAUDE.md, pointer.md, gitignore.append
@@ -93,13 +87,11 @@ templates/                         every file the agent copies, mirroring target
   .claude/ .cursor/ .github/       /done and /plan-check commands per AI tool
 docs/plan-check.md                 how /plan-check works and how to change its report
 tools/score_init.py                scores a scaffolded project, writes the init report
-tools/claude-delete-session{,.ps1} session cleaner, installed with `install.sh --with delete-session`
+tools/claude-delete-session{,.ps1} session cleaner
 tests/smoke_test.py                scaffolds into a temp dir and runs the checks
 .claude/commands/project-init.md   one-line command: read init.md and follow it
 ```
 
 ## Test
 
-`python tests/smoke_test.py` scaffolds the templates into an empty folder, runs `plan.py` (including `set-deps`), `sync_plan.py`, `check_adr.py` (duplicate-topic and stale run-id detection) and `plan_check.py` on a throwaway git repo, tests `install.sh --update` and `--with delete-session`, and fails on leftover placeholders or the old name. Run it after every change to `templates/`.
-
-Every question in `init.md` has a default, so the user can answer "defaults" for a quick setup.
+`python tests/smoke_test.py` scaffolds the templates into an empty folder, runs `plan.py` (including `set-deps`), `sync_plan.py`, `check_adr.py` (duplicate-topic and stale run-id detection) and `plan_check.py` on a throwaway git repo, tests `check_update.py`, `install.sh --update` and the delete-session install, and fails on leftover placeholders or the old name. Run it after every change to `templates/`.

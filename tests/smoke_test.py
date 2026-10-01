@@ -122,61 +122,38 @@ def main():
         if code:
             failures.append(f"scorer on a filled plan-check: {out}")
 
-        # update notice: newer remote -> message with changelog; same -> silent; throttled -> silent
+        # update check runs every session: no throttle, no state file; silent when current or offline
         remote = Path(tempfile.mkdtemp())
         (remote / "VERSION").write_text("9.9.9\n")
         (remote / "CHANGELOG.md").write_text("# c\n\n## 9.9.9 — 2030-01-01\n- Upgrade: do x\n\n## 0.0.1 — old\n- y\n")
         env = dict(os.environ, AGENT_GOV_REMOTE=remote.as_uri())
         chk = [sys.executable, ".agents/tools/check_update.py"]
-        r = subprocess.run(chk + ["--force"], cwd=tmp, capture_output=True, text=True, env=env)
-        if "9.9.9" not in r.stdout or "do x" not in r.stdout or "0.0.1" in r.stdout:
-            failures.append(f"check_update newer: {r.stdout}{r.stderr}")
-        r = subprocess.run(chk, cwd=tmp, capture_output=True, text=True, env=env)
-        if r.stdout:
-            failures.append(f"check_update not throttled: {r.stdout}")
+
+        def check(*extra):
+            return subprocess.run(chk + list(extra), cwd=tmp, capture_output=True, text=True, env=env)
+
+        for n in (1, 2, 3):  # every call prints while a newer version exists
+            r = check()
+            if "9.9.9" not in r.stdout or "do x" not in r.stdout or "0.0.1" in r.stdout:
+                failures.append(f"check_update call {n} with a newer remote: {r.stdout}{r.stderr}")
         (remote / "VERSION").write_text((ROOT / "VERSION").read_text())
-        r = subprocess.run(chk + ["--force"], cwd=tmp, capture_output=True, text=True, env=env)
-        if "up to date" not in r.stdout:
-            failures.append(f"check_update same version: {r.stdout}")
-        import datetime, json
-        state = tmp / ".agents/state/update-check.json"
-
-        def age(**kw):  # pretend the last network try / notice happened this long ago
-            d = json.loads(state.read_text())
-            for k, hours in kw.items():
-                d[k] = (datetime.datetime.now() - datetime.timedelta(hours=hours)).isoformat(timespec="seconds")
-            state.write_text(json.dumps(d))
-
-        def quiet_check():
-            return subprocess.run(chk, cwd=tmp, capture_output=True, text=True, env=env)
-
-        # the bug that hid releases: a check that said "up to date" must not hide a release made right after
-        state.unlink(missing_ok=True)
-        env["AGENT_GOV_REMOTE"] = remote.as_uri()  # remote = current version
-        if quiet_check().stdout:
+        if check().stdout:
             failures.append("check_update spoke while up to date")
-        (remote / "VERSION").write_text("9.9.9\n")
-        if quiet_check().stdout:
-            failures.append("check_update hit the network again inside the 1h window")
-        age(tried=2)
-        r = quiet_check()
-        if "9.9.9" not in r.stdout:
-            failures.append(f"release made after an up-to-date check not announced after 1h: {r.stdout}")
-        age(tried=2)
-        if quiet_check().stdout:
-            failures.append("same notice repeated within 24h")
-        age(tried=2, announced_at=30)
-        if "9.9.9" not in quiet_check().stdout:
-            failures.append("notice not repeated after 24h")
-        # offline: silent, and a failed try waits an hour as well
+        if "up to date" not in check("--force").stdout:
+            failures.append("check_update --force did not say up to date")
         env["AGENT_GOV_REMOTE"] = "file:///nonexistent"
-        age(tried=2, announced_at=30)
-        r = quiet_check()
+        r = check()
         if r.returncode or r.stdout:
             failures.append("check_update offline not silent")
+        if "offline" not in check("--force").stdout:
+            failures.append("check_update --force did not explain being offline")
+        env["AGENT_GOV_NO_UPDATE_CHECK"] = "1"
         env["AGENT_GOV_REMOTE"] = remote.as_uri()
-        if quiet_check().stdout:
-            failures.append("failed try did not back off for an hour")
+        (remote / "VERSION").write_text("9.9.9\n")
+        if check("--force").stdout:
+            failures.append("AGENT_GOV_NO_UPDATE_CHECK not honoured")
+        if list((tmp / ".agents/state").glob("update-check*")):
+            failures.append("check_update left a state file")
         shutil.rmtree(remote, ignore_errors=True)
 
         # ADR rules: two accepted ADRs on one topic must fail; a run-id check must catch stale numbers.
@@ -229,22 +206,35 @@ def main():
         failures.append(f"install --update when behind: {r.stdout}{r.stderr}")
     shutil.rmtree(base, ignore_errors=True)
 
-    # delete-session: compiles, installs, keeps settings, idempotent
+    # delete-session: compiles; installed by a user-wide claude install only; keeps settings; idempotent
     src = ROOT / "tools/claude-delete-session"
     compile(src.read_text(encoding="utf-8"), str(src), "exec")
+    import json
+
+    def install(home, *args, cwd=None):
+        return subprocess.run(["bash", str(ROOT / "install.sh"), *args], capture_output=True, text=True,
+                              cwd=cwd, env=dict(os.environ, HOME=str(home)))
+
     home = Path(tempfile.mkdtemp())
     (home / ".claude").mkdir()
     (home / ".claude/settings.json").write_text('{"model": "x", "permissions": {"allow": ["Bash(ls)"]}}')
     for _ in range(2):
-        r = subprocess.run(["bash", str(ROOT / "install.sh"), "--with", "delete-session"],
-                           capture_output=True, text=True, env=dict(os.environ, HOME=str(home)))
-    import json
+        r = install(home, "--agent", "claude")
     cfg = json.loads((home / ".claude/settings.json").read_text())
     rule = "Bash(~/.local/bin/claude-delete-session)"
     if r.returncode or not (home / ".local/bin/claude-delete-session").is_file():
-        failures.append(f"install --with delete-session: {r.stdout}{r.stderr}")
+        failures.append(f"install --agent claude did not install delete-session: {r.stdout}{r.stderr}")
     if cfg.get("model") != "x" or cfg["permissions"]["allow"] != ["Bash(ls)", rule]:
         failures.append(f"settings.json not preserved or rule duplicated: {cfg}")
+    for args, why in ((("--agent", "cursor"), "cursor"), (("--agent", "claude", "--project"), "claude --project")):
+        other = Path(tempfile.mkdtemp())
+        r = install(other, *args, cwd=other)
+        if r.returncode or (other / ".local").exists():
+            failures.append(f"install {why} must not install delete-session: {r.stdout}{r.stderr}")
+        shutil.rmtree(other, ignore_errors=True)
+    r = install(home, "--with", "delete-session")
+    if r.returncode != 2:
+        failures.append("the removed --with option was accepted")
     shutil.rmtree(home, ignore_errors=True)
 
     # no leftovers of the old name outside the changelog

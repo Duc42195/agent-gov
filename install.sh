@@ -2,22 +2,20 @@
 # Install the /project-init command for one or more AI agents.
 #   install.sh [--agent claude,cursor,copilot,codex,gemini,all] [--project]
 #   install.sh --update      pull the latest agent-gov (this clone) and show what changed
-#   install.sh --with delete-session   also install tools/claude-delete-session (see below)
-# No --agent (and no --with): asks (or uses claude when not run in a terminal).
-# --with delete-session copies the tool to ~/.local/bin and adds the rule
-#   Bash(~/.local/bin/claude-delete-session) to ~/.claude/settings.json (Claude Code only).
+# No --agent: asks (or uses claude when not run in a terminal).
+# User-wide install for claude also installs tools/claude-delete-session: it copies the tool to
+#   ~/.local/bin and adds the rule Bash(~/.local/bin/claude-delete-session) to ~/.claude/settings.json.
 # Default scope is user-wide; --project installs into the current directory.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGENTS=""; PROJECT=0; UPDATE=0; WITH=""
+AGENTS=""; PROJECT=0; UPDATE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --agent) AGENTS="${2:?--agent needs a value}"; shift 2 ;;
     --project) PROJECT=1; shift ;;
     --update) UPDATE=1; shift ;;
-    --with) WITH="${2:?--with needs a value}"; shift 2 ;;
-    -h|--help) sed -n 2,9p "$0"; exit 0 ;;
+    -h|--help) sed -n 2,8p "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -64,17 +62,6 @@ PYEOF
   echo "use: claude-delete-session   (inside Claude: !claude-delete-session)"
 }
 
-if [ -n "$WITH" ]; then
-  IFS=',' read -ra EXTRA <<< "$WITH"
-  for w in "${EXTRA[@]}"; do
-    case "$w" in
-      delete-session) install_delete_session ;;
-      *) echo "unknown --with: $w (delete-session)" >&2; exit 2 ;;
-    esac
-  done
-  [ -z "$AGENTS" ] && exit 0
-fi
-
 if [ -z "$AGENTS" ]; then
   if [ -t 0 ]; then
     read -r -p "Agent(s): claude, cursor, copilot, codex, gemini, other, all (comma separated) [claude]: " AGENTS
@@ -101,11 +88,13 @@ write() {  # write <dir> <file> <content>; dir may be empty = unsupported here
   echo "installed $agent: $dir/$file"
 }
 
+HAS_CLAUDE=0
 IFS=',' read -ra LIST <<< "$AGENTS"
 for a in "${LIST[@]}"; do
   a="$(echo "$a" | tr -d ' ' | tr 'A-Z' 'a-z')"
   case "$a" in
     claude)
+      HAS_CLAUDE=1
       write claude "$(scope_dir .claude/commands "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands")" project-init.md \
 "---
 description: $DESC
@@ -137,4 +126,11 @@ $BODY
     *) echo "unknown agent: $a (claude, cursor, copilot, codex, gemini, other)" >&2; exit 2 ;;
   esac
 done
+if [ "$HAS_CLAUDE" = 1 ]; then
+  if [ "$PROJECT" = 0 ]; then
+    install_delete_session
+  else
+    echo "skipped claude-delete-session: it is user-wide; run install.sh --agent claude without --project to add it"
+  fi
+fi
 echo "restart your agent, then run /project-init (or the prompt above for 'other')"
