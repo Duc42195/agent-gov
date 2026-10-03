@@ -6,7 +6,7 @@
 #
 # install.cmd just calls this script with -ExecutionPolicy Bypass, because Windows blocks
 # unsigned .ps1 files by default. No -Agent: asks (or uses claude when not run in a terminal).
-# User-wide install for claude also copies tools\claude-delete-session.ps1 to ~\.local\bin
+# User-wide install for claude also copies bin\claude-delete-session.ps1 to ~\.local\bin
 # (unlike install.sh it does not edit settings.json).
 # Default scope is user-wide; -Project installs into the current directory.
 [CmdletBinding()]
@@ -133,7 +133,7 @@ if ($hasClaude) {
     if (-not $Project) {
         $bin = Join-Path $HOME '.local\bin'
         New-Item -ItemType Directory -Force -Path $bin | Out-Null
-        Copy-Item -Force (Join-Path $Repo 'tools\claude-delete-session.ps1') $bin
+        Copy-Item -Force (Join-Path $Repo 'bin\claude-delete-session.ps1') $bin
         Write-Output "installed delete-session: $bin\claude-delete-session.ps1"
         Write-Output "use: powershell -File $bin\claude-delete-session.ps1   (inside Claude: !powershell -File ...)"
         Write-Output 'note: settings.json was not changed; Claude Code will ask before running it.'

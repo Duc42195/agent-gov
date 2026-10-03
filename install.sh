@@ -4,7 +4,7 @@
 #   (Windows: install.cmd / install.ps1 with -Agent, -Project, -Update)
 #   install.sh --update      pull the latest agent-gov (this clone) and show what changed
 # No --agent: asks (or uses claude when not run in a terminal).
-# User-wide install for claude also installs tools/claude-delete-session: it copies the tool to
+# User-wide install for claude also installs bin/claude-delete-session: it copies the tool to
 #   ~/.local/bin and adds the rule Bash(~/.local/bin/claude-delete-session) to ~/.claude/settings.json.
 # Default scope is user-wide; --project installs into the current directory.
 set -euo pipefail
@@ -35,7 +35,7 @@ fi
 install_delete_session() {
   local bin="$HOME/.local/bin" settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
   mkdir -p "$bin"
-  cp "$REPO/tools/claude-delete-session" "$bin/claude-delete-session"
+  cp "$REPO/bin/claude-delete-session" "$bin/claude-delete-session"
   chmod +x "$bin/claude-delete-session"
   echo "installed delete-session: $bin/claude-delete-session"
   if [ -f "$settings" ] && command -v python3 >/dev/null; then

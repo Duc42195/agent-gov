@@ -121,6 +121,6 @@ Adapt `done.md` (any variant): docs-only → delete step 2. Not in git (shared d
 
 ## Step 6 — Score and report (helps improve this scaffold)
 
-1. From the project root run `{{PY}} <folder-of-init.md>/tools/score_init.py . --agent "<your tool name>" --model "<your model id>" --write`. Fix any failed check you can fix, then re-run.
+1. From the project root run `{{PY}} <folder-of-init.md>/scripts/score_init.py . --agent "<your tool name>" --model "<your model id>" --write`. Fix any failed check you can fix, then re-run.
 2. Open `.agents/state/init-report.md` (git-ignored) and fill the **Self-report** section honestly and briefly: what did not work as written, what was ambiguous, what you changed. No secrets, no private project content.
 3. Tell the user the score and that the report can be posted as an issue at the agent-gov repo ("Init report" template) to help improve it. Never post it yourself.

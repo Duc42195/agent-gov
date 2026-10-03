@@ -42,7 +42,7 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 git clone https://github.com/Duc42195/agent-gov.git $HOME\.agent-gov
 & $HOME\.agent-gov\install.cmd -Agent claude
 ```
-One project only: from the project root, `& .\agent-gov\install.cmd -Agent claude -Project`. Update: `& $HOME\.agent-gov\install.cmd -Update`. The parameters are the same as `install.sh` but with PowerShell names: `-Agent`, `-Project`, `-Update`. It finds Python as `py -3`, `python` or `python3`. For `claude` it copies `tools\claude-delete-session.ps1` to `~\.local\bin` but, unlike `install.sh`, does not edit `settings.json`. If the clone fails or the scripts look garbled, run `git config --global core.autocrlf false` and clone again; `.gitattributes` already keeps `*.sh` as LF. Windows support has not been tested on a real Windows machine yet: **please [raise an issue](https://github.com/Duc42195/agent-gov/issues/new?template=init-report.yml) with the error text if it fails.**
+One project only: from the project root, `& .\agent-gov\install.cmd -Agent claude -Project`. Update: `& $HOME\.agent-gov\install.cmd -Update`. The parameters are the same as `install.sh` but with PowerShell names: `-Agent`, `-Project`, `-Update`. It finds Python as `py -3`, `python` or `python3`. For `claude` it copies `bin\claude-delete-session.ps1` to `~\.local\bin` but, unlike `install.sh`, does not edit `settings.json`. If the clone fails or the scripts look garbled, run `git config --global core.autocrlf false` and clone again; `.gitattributes` already keeps `*.sh` as LF. Windows support has not been tested on a real Windows machine yet: **please [raise an issue](https://github.com/Duc42195/agent-gov/issues/new?template=init-report.yml) with the error text if it fails.**
 
 **Python.** The scripts need Python 3.8+. `install.sh` looks for `python3`, `python`, then `py -3` and writes the one it finds into the `/project-init` command (it warns if there is none). Init confirms it, records it in the `Python:` line of `AGENTS.md`, and writes that interpreter into every command it copies, so nothing says a bare `python` your machine does not have. With no Python, `/plan-check` replies `Python 3.8+ not found` instead of failing.
 
@@ -63,7 +63,7 @@ One project only: from the project root, `& .\agent-gov\install.cmd -Agent claud
 **What else you get**
 
 - **`/plan-check` (standup, offered by `/project-init`, question 10).** Compares `plan.csv` with git and every MR/PR, says ON TRACK or BEHIND SCHEDULE, and shows who each task blocks, in one table. Init copies it and **tailors the command to your project**: it fills a `Project checks` block with 3–6 read-only checks that fit (gate green, result ADRs match reports, tracker drift, reviews pending, ...). The script and the table template stay fixed. `/done` and `/plan-check` come in Claude Code, Cursor, Copilot and OpenCode variants. Details: [docs/plan-check.md](docs/plan-check.md).
-- **`claude-delete-session` (Claude Code only, installed by default).** A terminal list like `claude -r`, but for deleting: it shows the sessions of the folder you run it in, newest first; type to search, `Ctrl+A` switches to all projects, `Ctrl+B` limits to the current git branch, `Ctrl+V` previews, `Tab` marks several, `Enter` deletes after a y/N question, `Esc` quits. It removes the session file and its data folder. Run it as `claude-delete-session` in a normal terminal, or `!claude-delete-session` at the Claude Code prompt (do not type the `!` in bash: there it repeats an earlier command). A user-wide `install.sh --agent claude` copies it to `~/.local/bin` **and adds the rule `Bash(~/.local/bin/claude-delete-session)` to `~/.claude/settings.json`**. Deleting is permanent. The Windows version `tools/claude-delete-session.ps1` is the older all-projects list and is not tested here.
+- **`claude-delete-session` (Claude Code only, installed by default).** A terminal list like `claude -r`, but for deleting: it shows the sessions of the folder you run it in, newest first; type to search, `Ctrl+A` switches to all projects, `Ctrl+B` limits to the current git branch, `Ctrl+V` previews, `Tab` marks several, `Enter` deletes after a y/N question, `Esc` quits. It removes the session file and its data folder. Run it as `claude-delete-session` in a normal terminal, or `!claude-delete-session` at the Claude Code prompt (do not type the `!` in bash: there it repeats an earlier command). A user-wide `install.sh --agent claude` copies it to `~/.local/bin` **and adds the rule `Bash(~/.local/bin/claude-delete-session)` to `~/.claude/settings.json`**. Deleting is permanent. The Windows version `bin/claude-delete-session.ps1` is the older all-projects list and is not tested here.
 
 ## Updates
 
@@ -85,9 +85,9 @@ Docs-only changes (README, `docs/`) do not bump the version. We stay on `0.x` un
 
 Only Claude Code is tested here. If you use another agent, **please [raise an issue](https://github.com/Duc42195/agent-gov/issues/new?template=init-report.yml)** with how it went, good or bad.
 
-The last step of `init.md` makes the agent measure itself: `tools/score_init.py` checks the result objectively (files, leftover placeholders, tools run, profile filled, `/done` present) and writes `.agents/state/init-report.md` (git-ignored). The agent then fills a short self-report: what it could not follow, what was ambiguous, what it changed. Review that file, remove anything private, and paste it into the *Init report* issue. Nothing is sent automatically.
+The last step of `init.md` makes the agent measure itself: `scripts/score_init.py` checks the result objectively (files, leftover placeholders, tools run, profile filled, `/done` present) and writes `.agents/state/init-report.md` (git-ignored). The agent then fills a short self-report: what it could not follow, what was ambiguous, what it changed. Review that file, remove anything private, and paste it into the *Init report* issue. Nothing is sent automatically.
 
-You can also score any project yourself: `python3 tools/score_init.py /path/to/project --agent NAME --model NAME`.
+You can also score any project yourself: `python3 scripts/score_init.py /path/to/project --agent NAME --model NAME`.
 
 ## Files
 
@@ -102,8 +102,8 @@ templates/                         every file the agent copies, mirroring target
   .agents/plan-check/              standup script and report templates (optional)
   .claude/ .cursor/ .github/ .opencode/ /done and /plan-check commands per AI tool
 docs/plan-check.md                 how /plan-check works and how to change its report
-tools/score_init.py                scores a scaffolded project, writes the init report
-tools/claude-delete-session{,.ps1} session cleaner
+scripts/score_init.py              scores a scaffolded project, writes the init report
+bin/claude-delete-session{,.ps1}   session cleaner (installed on the machine)
 tests/smoke_test.py                scaffolds into a temp dir and runs the checks
 .claude/commands/project-init.md   one-line command: read init.md and follow it
 ```

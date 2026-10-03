@@ -67,7 +67,7 @@ def checks(root):
     if py and py.group(1) != "python":
         bare = []
         for f in [root / "AGENTS.md", *[root / c for c in DONE_CMDS + PLAN_CHECK_CMDS]]:
-            if f.is_file() and re.search(r"(?<![\w-])python (?:\.agents/|tools/)", f.read_text(encoding="utf-8")):
+            if f.is_file() and re.search(r"(?<![\w-])python (?:\.agents/|scripts/)", f.read_text(encoding="utf-8")):
                 bare.append(str(f.relative_to(root)))
         add("commands use the detected Python, not a bare `python`", not bare, ", ".join(bare))
     add("AGENTS.md short (<= 80 lines)", 0 < len(agents.splitlines()) <= 80,

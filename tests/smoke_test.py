@@ -62,7 +62,7 @@ def main():
         r = tmp / ".agents/roles.md"
         r.write_text(r.read_text().replace("<name>", "me").replace("<role>", "maintainer"))
         (tmp / ".gitignore").write_text((TEMPLATES / "gitignore.append").read_text())
-        scorer = str(ROOT / "tools" / "score_init.py")
+        scorer = str(ROOT / "scripts" / "score_init.py")
         code, out = run(tmp, sys.executable, scorer, ".", "--agent", "t", "--write")
         if code or not (tmp / ".agents/state/init-report.md").is_file():
             failures.append(f"score_init on a good scaffold: {out}")
@@ -187,7 +187,7 @@ def main():
     shutil.rmtree(base, ignore_errors=True)
 
     # delete-session: compiles; installed by a user-wide claude install only; keeps settings; idempotent
-    src = ROOT / "tools/claude-delete-session"
+    src = ROOT / "bin/claude-delete-session"
     compile(src.read_text(encoding="utf-8"), str(src), "exec")
     import json
 
@@ -252,7 +252,7 @@ def main():
             fcntl.ioctl(sl, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
             env = dict(os.environ, HOME=str(home), TERM="xterm")
             env.pop("CLAUDE_CONFIG_DIR", None)
-            pr = subprocess.Popen([sys.executable, str(ROOT / "tools/claude-delete-session")], stdin=sl, stdout=sl,
+            pr = subprocess.Popen([sys.executable, str(ROOT / "bin/claude-delete-session")], stdin=sl, stdout=sl,
                                   stderr=sl, cwd=proj, env=env, close_fds=True)
             os.close(sl)
             out = b""
@@ -317,7 +317,7 @@ def main():
         if "Python 3.8+ not found" not in (TEMPLATES / c).read_text():
             failures.append(f"{c} lacks the missing-Python reply")
     for f in TEMPLATES.rglob("*"):
-        if f.is_file() and f.suffix == ".md" and re.search(r"(?<![\w-])python (?:\.agents/|tools/)", f.read_text()):
+        if f.is_file() and f.suffix == ".md" and re.search(r"(?<![\w-])python (?:\.agents/|scripts/)", f.read_text()):
             failures.append(f"bare `python` command left in template {f.relative_to(TEMPLATES)}")
 
     # OpenCode: global dir is ~/.config/opencode/commands, project dir is .opencode/commands
