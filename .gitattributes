@@ -1,0 +1,8 @@
+# Shell scripts must keep LF even when git on Windows has autocrlf on (CRLF breaks bash).
+*.sh text eol=lf
+*.py text eol=lf
+tools/claude-delete-session text eol=lf
+install.sh text eol=lf
+# Windows scripts: CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf

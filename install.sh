@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install the /project-init command for one or more AI agents.
-#   install.sh [--agent claude,cursor,copilot,codex,gemini,all] [--project]
+#   install.sh [--agent claude,cursor,copilot,codex,gemini,opencode,all] [--project]
+#   (Windows: install.cmd / install.ps1 with -Agent, -Project, -Update)
 #   install.sh --update      pull the latest agent-gov (this clone) and show what changed
 # No --agent: asks (or uses claude when not run in a terminal).
 # User-wide install for claude also installs tools/claude-delete-session: it copies the tool to
@@ -15,7 +16,7 @@ while [ $# -gt 0 ]; do
     --agent) AGENTS="${2:?--agent needs a value}"; shift 2 ;;
     --project) PROJECT=1; shift ;;
     --update) UPDATE=1; shift ;;
-    -h|--help) sed -n 2,8p "$0"; exit 0 ;;
+    -h|--help) sed -n 2,9p "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -141,7 +142,7 @@ prompt = \"\"\"
 $BODY
 \"\"\"" ;;
     opencode)
-      write opencode "$(scope_dir .opencode/commands "$HOME/.opencode/commands")" project-init.md "$BODY" ;;
+      write opencode "$(scope_dir .opencode/commands "$HOME/.config/opencode/commands")" project-init.md "$BODY" ;;
     other|"")
       echo "other agent: no command file needed. Tell it: \"Read and follow $REPO/init.md\"" ;;
     *) echo "unknown agent: $a (claude, cursor, copilot, codex, gemini, opencode, other)" >&2; exit 2 ;;

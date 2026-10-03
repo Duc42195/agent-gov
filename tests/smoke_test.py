@@ -13,6 +13,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = ROOT / "templates"
+PLAN_CHECK_FILES = (".claude/commands/plan-check.md", ".cursor/commands/plan-check.md",
+                    ".github/prompts/plan-check.prompt.md", ".opencode/commands/plan-check.md")
 VALUES = {
     "PROJECT_NAME": "demo", "IS_RESEARCH": "yes", "TASK_KEY": "DEMO",
     "GIT_HOST": "GitHub", "DEFAULT_BRANCH": "main",
@@ -50,7 +52,7 @@ def main():
             failures.append(f"placeholders left in: {left}")
 
         # what the agent fills in by hand
-        for c in (".claude/commands/plan-check.md", ".cursor/commands/plan-check.md", ".github/prompts/plan-check.prompt.md"):
+        for c in PLAN_CHECK_FILES:
             f = tmp / c
             f.write_text(f.read_text().replace("<!-- PROJECT-CHECKS -->", "- gate passes"))
         a = tmp / "AGENTS.md"
@@ -223,12 +225,55 @@ def main():
         if r.returncode or want_in_cmd not in cmd or (("WARNING" in r.stderr) != want_warn):
             failures.append(f"python detection with candidates {cands!r}: {r.stdout}{r.stderr}")
         shutil.rmtree(h, ignore_errors=True)
-    for c in (".claude/commands/plan-check.md", ".cursor/commands/plan-check.md", ".github/prompts/plan-check.prompt.md"):
+    for c in PLAN_CHECK_FILES:
         if "Python 3.8+ not found" not in (TEMPLATES / c).read_text():
             failures.append(f"{c} lacks the missing-Python reply")
     for f in TEMPLATES.rglob("*"):
         if f.is_file() and f.suffix == ".md" and re.search(r"(?<![\w-])python (?:\.agents/|tools/)", f.read_text()):
             failures.append(f"bare `python` command left in template {f.relative_to(TEMPLATES)}")
+
+    # OpenCode: global dir is ~/.config/opencode/commands, project dir is .opencode/commands
+    for args, rel, cwd_home in ((("--agent", "opencode"), ".config/opencode/commands/project-init.md", False),
+                                (("--agent", "opencode", "--project"), ".opencode/commands/project-init.md", True)):
+        h = Path(tempfile.mkdtemp())
+        r = subprocess.run(["bash", str(ROOT / "install.sh"), *args], capture_output=True, text=True,
+                           cwd=h, env=dict(os.environ, HOME=str(h)))
+        if r.returncode or not (h / rel).is_file():
+            failures.append(f"install {' '.join(args)} did not write {rel}: {r.stdout}{r.stderr}")
+        shutil.rmtree(h, ignore_errors=True)
+
+    # Windows installer: cannot run PowerShell everywhere, so check what can break it statically
+    ps1 = (ROOT / "install.ps1").read_text(encoding="utf-8")
+    sh = (ROOT / "install.sh").read_text(encoding="utf-8")
+    if not ps1.isascii():
+        failures.append("install.ps1 must be ASCII only (Windows PowerShell 5.1 misreads BOM-less UTF-8)")
+    for bad in ("&&", "||", "??", "?."):
+        if bad in ps1:
+            failures.append(f"install.ps1 uses {bad!r}, which Windows PowerShell 5.1 does not parse")
+    for f in ROOT.rglob("*.ps1"):
+        raw = f.read_bytes()
+        if not raw.isascii() and not raw.startswith(b"\xef\xbb\xbf"):
+            failures.append(f"{f.relative_to(ROOT)} has non-ASCII text but no UTF-8 BOM (PowerShell 5.1 would misread it)")
+    cmd = (ROOT / "install.cmd").read_text()
+    if "-ExecutionPolicy Bypass" not in cmd or "install.ps1" not in cmd:
+        failures.append("install.cmd must call install.ps1 with -ExecutionPolicy Bypass")
+    attrs = (ROOT / ".gitattributes").read_text()
+    if "*.sh text eol=lf" not in attrs or "*.ps1 text eol=crlf" not in attrs:
+        failures.append(".gitattributes must force LF for *.sh and CRLF for *.ps1")
+    ps1_norm = ps1.replace("\\", "/")
+    for frag in (".claude/commands", ".cursor/commands", ".github/prompts", ".gemini/commands", ".opencode/commands",
+                 ".config/opencode/commands", ".codex", "prompts", "project-init.md", "project-init.prompt.md",
+                 "project-init.toml"):
+        if frag not in sh or frag not in ps1_norm:
+            failures.append(f"install.sh and install.ps1 disagree: {frag!r} missing from one of them")
+    pwsh = shutil.which("pwsh")
+    if pwsh:  # real run when PowerShell is available
+        h = Path(tempfile.mkdtemp())
+        r = subprocess.run([pwsh, "-NoProfile", "-File", str(ROOT / "install.ps1"), "-Agent", "opencode,cursor"],
+                           capture_output=True, text=True, env=dict(os.environ, HOME=str(h), USERPROFILE=str(h)))
+        if r.returncode or not (h / ".config/opencode/commands/project-init.md").is_file():
+            failures.append(f"install.ps1 under pwsh: {r.stdout}{r.stderr}")
+        shutil.rmtree(h, ignore_errors=True)
 
     # no leftovers of the old name outside the changelog
     for f in list(ROOT.rglob("*")):

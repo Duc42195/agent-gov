@@ -37,6 +37,13 @@ git clone https://github.com/Duc42195/agent-gov.git && agent-gov/install.sh --ag
 
 Then restart the agent and type `/project-init`. Several agents: `--agent claude,cursor`.
 
+**Windows (PowerShell).** Use `install.cmd` (it calls `install.ps1` with the execution policy bypassed, because Windows blocks unsigned `.ps1` files by default). PowerShell 5.1 has no `&&`, so run the two steps on separate lines:
+```
+git clone https://github.com/Duc42195/agent-gov.git $HOME\.agent-gov
+& $HOME\.agent-gov\install.cmd -Agent claude
+```
+One project only: from the project root, `& .\agent-gov\install.cmd -Agent claude -Project`. Update: `& $HOME\.agent-gov\install.cmd -Update`. The parameters are the same as `install.sh` but with PowerShell names: `-Agent`, `-Project`, `-Update`. It finds Python as `py -3`, `python` or `python3`. For `claude` it copies `tools\claude-delete-session.ps1` to `~\.local\bin` but, unlike `install.sh`, does not edit `settings.json`. If the clone fails or the scripts look garbled, run `git config --global core.autocrlf false` and clone again; `.gitattributes` already keeps `*.sh` as LF. Windows support has not been tested on a real Windows machine yet: **please [raise an issue](https://github.com/Duc42195/agent-gov/issues/new?template=init-report.yml) with the error text if it fails.**
+
 **Python.** The scripts need Python 3.8+. `install.sh` looks for `python3`, `python`, then `py -3` and writes the one it finds into the `/project-init` command (it warns if there is none). Init confirms it, records it in the `Python:` line of `AGENTS.md`, and writes that interpreter into every command it copies, so nothing says a bare `python` your machine does not have. With no Python, `/plan-check` replies `Python 3.8+ not found` instead of failing.
 
 | Agent | User-wide | `--project` |
@@ -46,7 +53,7 @@ Then restart the agent and type `/project-init`. Several agents: `--agent claude
 | copilot | not supported | `.github/prompts/` |
 | codex | `~/.codex/prompts/` | not supported |
 | gemini | `~/.gemini/commands/` | `.gemini/commands/` |
-| opencode | `~/.opencode/commands/` | `.opencode/commands/` |
+| opencode | `~/.config/opencode/commands/` | `.opencode/commands/` |
 | other | no file: tell the agent "Read and follow /path/to/agent-gov/init.md" | same |
 
 **New projects from a template.** Tick *Template repository* in the GitHub settings, click *Use this template* per project; `.claude/commands/project-init.md` finds `./init.md` itself.
@@ -86,7 +93,7 @@ You can also score any project yourself: `python3 tools/score_init.py /path/to/p
 
 ```
 VERSION, CHANGELOG.md              release version and upgrade notes
-install.sh                         installs /project-init (+ claude-delete-session for a user-wide claude install)
+install.sh, install.ps1, install.cmd  install /project-init (+ claude-delete-session for a user-wide claude install); .ps1/.cmd are for Windows
 init.md                            the procedure the agent follows (short)
 templates/                         every file the agent copies, mirroring target paths
   AGENTS.md, CLAUDE.md, pointer.md, gitignore.append

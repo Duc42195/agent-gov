@@ -4,6 +4,14 @@ Newest first. Heading format `## X.Y.Z — YYYY-MM-DD` is read by the upgrade mo
 Lines starting with `Upgrade:` tell an already-scaffolded project what to change by hand or by agent.
 Version numbers follow the rule in the README ("Releasing"): patch = a fix that only replaces a script, minor = a feature or a change to files the project owns.
 
+## 0.8.0 — 2026-10-03
+- Windows installer: `install.cmd` / `install.ps1` (`-Agent`, `-Project`, `-Update`), same agents and Python detection as `install.sh` (`py -3`, `python`, `python3`). For `claude` it copies `tools\claude-delete-session.ps1` to `~\.local\bin` and does not edit `settings.json`. Not yet tested on a real Windows machine.
+- Fix: the user-wide OpenCode command directory is `~/.config/opencode/commands/`, not `~/.opencode/commands/` (0.7.0 wrote to the wrong place, so OpenCode never saw `/project-init`). The project directory `.opencode/commands/` was already right.
+- Fix for Windows: `.gitattributes` keeps `*.sh` and `*.py` as LF (CRLF from `git clone` with autocrlf breaks bash), and `tools/claude-delete-session.ps1` now has a UTF-8 BOM (Windows PowerShell 5.1 misread its non-ASCII characters).
+- Tests: the smoke test now checks the OpenCode paths, the `/plan-check` command of every agent (it was red at 0.7.0), and statically checks the Windows scripts.
+- Upgrade: if you installed OpenCode with 0.7.0, run `install.sh --agent opencode` again and delete `~/.opencode/commands/project-init.md`.
+- Upgrade: write `0.8.0` to `.agents/init-version`.
+
 ## 0.7.0 — 2026-10-01
 - Added OpenCode as a supported agent: `install.sh --agent opencode` installs `/project-init` to `~/.opencode/commands/` (user-wide) or `.opencode/commands/` (`--project`). OpenCode is included in `--all` and in the interactive prompt.
 - New templates: `templates/.opencode/commands/done.md` and `templates/.opencode/commands/plan-check.md`.

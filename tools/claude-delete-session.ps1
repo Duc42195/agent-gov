@@ -1,4 +1,4 @@
-# claude-delete-session.ps1 — Interactive Claude Code session manager (Windows)
+﻿# claude-delete-session.ps1 — Interactive Claude Code session manager (Windows)
 #
 #   ↑↓ / PgUp/PgDn  Navigate
 #   Type             Filter/search
