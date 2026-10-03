@@ -1,126 +1,79 @@
-# init.md — bootstrap agent governance for a new project
+# init.md — bootstrap or upgrade agent governance in a project
 
-**You are an AI coding agent. Follow this file step by step.** It sets up a small, shared way of working so a project with several people (and several AI tools) stays consistent: one rulebook, one task list, one decision record, one running knowledge base.
+**You are an AI coding agent. Follow this file step by step.** It gives a project one rulebook (`AGENTS.md`), one task list (`plan.csv`), one decision log and a small knowledge base, so several people and several AI tools stay consistent.
 
 Ground rules:
-- Ask the user in the language they write in.
-- Never overwrite an existing file. If a target exists, read it, keep its content, add only what is missing.
-- Ask questions once, in a single batch (use your question tool if you have one). Do not interrogate.
-- Never write secrets, tokens or passwords into any file.
-- Do not commit or push. At the end, tell the user what to commit.
-- When done, run Step 6. It is how this scaffold gets better.
+- Ask the user in the language they write in. Ask once, in one batch, and only what you could not learn from the project.
+- Work only inside the target project: the folder you were opened in, never this folder (`$REPO`, the one holding this file). Change nothing outside the project.
+- Never overwrite an existing file, never write secrets, never commit or push (at the end, say what to commit).
+- Let the scripts do the copying, hashing and comparing: they cost no tokens. Read only the files a step names.
 
-Four axes:
+## The tools
 
-| Axis | What | Files |
-|---|---|---|
-| 1. Context | what everyone must know | `AGENTS.md`, `plan.csv`, `.agents/adr/`, `.agents/wiki/` |
-| 2. Action | how work gets closed | `/done <task-id>` command |
-| 3. External | sync with trackers / git host | `.agents/tools/sync_plan.py` |
-| 4. Team | who does what, how far, is it right | `.agents/roles.md` + columns in `plan.csv` |
+`$REPO/scripts/gov.sh` (bash; Git Bash on Windows) or `gov.ps1` (`powershell -NoProfile -ExecutionPolicy Bypass -File ...`). This machine's settings are in `$REPO/.env`: use `gov.sh` when `AGENT_GOV_SHELL` is `bash`, `zsh`, `fish`, `git-bash` or `wsl`, `gov.ps1` when it is `powershell`, `pwsh` or `cmd`. `AGENT_GOV_PY` is the Python command (only `/plan-check` needs Python; `none` means it cannot be used). If no script can run, use the manual fallback at the end.
 
-## Where the templates are
-
-The target project is the directory Claude Code was opened in. If this file sits in a subfolder (e.g. `./agent-gov/`), that folder is only the source: write into the project root, never into it.
-
-All file contents live in `templates/`, mirroring the target paths. Find that folder next to this file, or in `~/.claude/templates/templates/`. Copy files from there; do not retype them. Only read a template when you are about to create it.
+| Command | What it does |
+|---|---|
+| `gov.sh detect <project>` | prints facts about the project (manifest, git, profile, plan.csv, legacy files, gate guess) |
+| `gov.sh scaffold <project> --vars FILE` | copies the templates, filled with the values in FILE; never overwrites; writes `.agents/init-manifest` |
+| `gov.sh upgrade <project> [--vars FILE] [--apply]` | plans an upgrade (default) or applies it |
+| `gov.sh record <project> <path>...` | after you merged `<path>.agent-gov-new` into `<path>` |
+| `scripts/score.sh <project> [--write]` | checks the result |
 
 ## Step 1 — Read what exists
 
-Learn from the repo before asking:
-- Git repo? Which host (`git remote -v`)? Default branch?
-- A `plan.csv` from an older setup (at the root or elsewhere): keep its rows. Migrate them in place into the new columns (header in `templates/plan.csv`), moving it to the project root if needed; never discard rows.
-- Existing `README*`, `AGENTS.md`, `CLAUDE.md`, `.agents/`, `plan.csv`, `docs/adr/`, notes.
-- Code or docs only? Check manifests (`pyproject.toml`, `package.json`, `go.mod`, ...). Docs-only means no gate command.
-- Gate command: test/lint from the manifest, `Makefile` or CI config.
-- Which AI tool config folders exist (`.claude/`, `.cursor/`, `.github/`, `.opencode/`).
-- **Python:** run `python3 --version`, `python --version`, `py -3 --version` in that order; the first that prints 3.8 or newer is `{{PY}}` (the `/project-init` command may already name it). If none works, `{{PY}}` = `python3` and the Profile line reads `Python: python3 (NOT FOUND at init: install Python 3.8+)`: tell the user, skip every step below that runs a script (Steps 5.1, 5.4 and 6), and say so in the report.
-- **Upgrade mode:** if `.agents/init-version` exists, this project is already scaffolded. Do not re-run Steps 2–4. Compare it with `VERSION` next to this file. Same version → say so and stop. Older → read `CHANGELOG.md`, apply every `Upgrade:` line for versions after it, replace unmodified files in `.agents/tools/` with the templates (show a diff and ask for any file the project changed), never touch `plan.csv` rows, wiki, ADRs, a filled `Project checks` block in a `plan-check` command, or `AGENTS.md` content beyond the listed changes, then write the new version to `.agents/init-version`, run Step 6 and report what changed.
+Run `gov.sh detect <project>`. Then:
+- `manifest=yes` → this project was set up by agent-gov before: go to **Upgrade**.
+- `manifest=no` and (`agents_md=yes`, or `legacy=` is not empty, or `.agents/` exists) → an older or hand-made setup: go to **Upgrade** (limited mode).
+- otherwise → a new project: Steps 2–6.
 
-If the project has content, summarise it in a few lines and skip every question you can already answer.
+## Step 2 — Confirm what you found, ask only what is missing
 
-## Step 2 — Ask what is missing
+Build the profile from the detect output and the files (read the README or `AGENTS.md` only to word *What* and *Goal*). Show it as a short table: value and where it came from. **Ask once** about every item that is empty or doubtful, each with a default; if nothing is missing, only ask "is this right?".
 
-One batch, only what you could not learn. Every answer has a default, so the user may reply "defaults".
+| Key | Meaning | Where to infer it | Default |
+|---|---|---|---|
+| `WHAT`, `GOAL` | what the project is, what "done" looks like (one line each) | README, `AGENTS.md` | ask |
+| `STACK` | tech stack | manifests (`package.json`, `pyproject.toml`, `go.mod`...) | `docs only` |
+| `IS_RESEARCH` | experiments, results, a paper? (`yes`/`no`) | README, folders like `paper/`, `experiments/` | `no` |
+| `TASK_KEY` | task id prefix | `task_prefix` in detect, ids in `plan.csv` | `TASK` |
+| `GIT_HOST`, `DEFAULT_BRANCH` | GitHub/GitLab/none, branch | `git_host`, `default_branch` | detected |
+| `GATE_CMD` | test/lint command (empty for docs only) | `gate_guess`, Makefile, CI | empty |
+| `EXTERNAL_TRACKER` | `jira`, `gsheet`, `excel` or `none` | ask only if the team mentions one | `none` |
+| `AGENTS` | AI tools used, comma list of `claude`, `cursor`, `copilot`, `gemini`, `opencode` | `agent_dirs` | `claude` |
+| `ROLE_NAME`, `ROLE`, `ROLE_OWNS` | the first person; more people go in `roles.md` later | `git_user` | git user, `maintainer`, `everything` |
+| `PLAN_CHECK` | want `/plan-check` (standup report: on or behind schedule, who blocks whom)? Only if the project uses git with MRs/PRs | | `no` |
 
-**System** (always ask 1–3 unless clear from the repo)
-1. What is the project and who is it for?
-2. What does "done" look like for the whole project?
-3. Tech stack (default: detected, else "docs only").
-4. Research project (experiments, results, paper)? → `{{IS_RESEARCH}}` `yes|no` (default `no`)
-5. Task id prefix → `{{TASK_KEY}}` (default `TASK`)
+`PY` and `PLAN` are set by the script from `.env`. The team is more than one person? Ask who, and which role each (`maintainer`, `dev`, `reviewer`, `qa`, `pm`, `researcher`, `writer`).
 
-**Tools** (skip if solo and defaults fit)
-6. External tracker `jira|gsheet|excel|none` → `{{EXTERNAL_TRACKER}}` (default `none`)
-7. Git host GitHub/GitLab/shared drive, default branch → `{{GIT_HOST}}`, `{{DEFAULT_BRANCH}}` (default: detected, else `main`)
-8. AI tools used: Claude Code, Cursor, Copilot, OpenCode, other (default: detected from config folders, else Claude Code)
+## Step 3 — Confirm, then write the values
 
-**Team** (skip if the repo is clearly solo)
-9. Who, and which role each? Roles: `maintainer`, `dev`, `reviewer`, `qa`, `pm`, `researcher`, `writer`. One person may hold several. Solo → one row (default: the git user as `maintainer`), review needing a second person is skipped.
-
-**Standup** (only if the project uses git with MR/PRs)
-10. Do you want `/plan-check`, a standup command that compares `plan.csv` with git and every MR/PR, says on or behind schedule, and shows who blocks whom? → default `no`.
-
-Set `{{PROJECT_NAME}}` from the folder name unless told otherwise. `{{PY}}` comes from Step 1; replace it everywhere you copy, so no command in the project says a bare `python` that this machine lacks. Set `{{GATE_CMD}}` to the gate command, or empty for docs-only.
-
-## Step 3 — Confirm, then write
-
-Show a short profile (what/goal/stack/type/team/tools) and the file list below. Get one yes.
+Show the finished profile and the list of files to be created. Get one yes. Write the values as `KEY=VALUE` lines (one line each) to `<project>/.agents/state/init-vars.env`.
 
 ## Step 4 — Scaffold
 
-Copy, replacing every `{{PLACEHOLDER}}` (no braces left behind), never overwriting.
+Run `gov.sh scaffold <project> --vars <project>/.agents/state/init-vars.env`. Read its output:
+- `EXISTS <file>`: the project already had that file, so it was kept. For `AGENTS.md`, merge in the sections it lacks (Profile, Working rules, Knowledge capture, Decision integrity), keeping the user's content. For `plan.csv`, keep every row and bring the columns to the header in `templates/plan.csv` (a task list in another format: ask first).
+- `UNSET <file> {{X}}`: a value was missing; fix it in the vars file and the file.
+- Then do the parts only you can do: add the team rows to `.agents/roles.md`; add tasks the user named to `plan.csv` (else leave the example row and say so); if `PLAN_CHECK=yes`, fill **`## Standup checks`** in `.agents/wiki/working-process.md` with 3 to 6 bullet lines that fit the project (read-only checks, see the examples there); if a tracker is used, note in `working-process.md` how to update it.
+- Do not hand-edit other generated files: later upgrades compare them with the template.
 
-| Copy from `templates/` | To | Notes |
-|---|---|---|
-| `AGENTS.md` | `AGENTS.md` | Fill Profile lines `<one line>` and stack. If the file exists, merge sections in. Not research → delete the `Results:` bullet and the HTML comment above it. |
-| `CLAUDE.md` | `CLAUDE.md` | One line `@AGENTS.md`. |
-| `pointer.md` | each other AI tool's own config location | Only for tools that do not read `AGENTS.md` natively, e.g. `.cursor/rules/agents.mdc`, `.github/copilot-instructions.md`. |
-| `gitignore.append` | `.gitignore` | Append missing lines; create if needed. |
-| `.agents/roles.md` | same | Fill the table from Step 2. |
-| `plan.csv` | `plan.csv` (project root) | Add rows for tasks the user named, else keep the example and say so. If one exists, migrate it, do not replace it. Columns: `status` `todo|in-progress|done`; `review` `pending|approved|changes`; `mr` MR/PR link; `dod` definition of done; `depends` ids this task waits on, `;`-separated; `adr` ADR numbers it delivers (it blocks its dependants until they are no longer `proposed`). |
-| `.agents/adr/*` | same | Includes index README and template. |
-| `.agents/wiki/*` | same | Four append-only logs. |
-| *(the `VERSION` file next to `init.md`)* | `.agents/init-version` | Copy its content. Lets `/project-init` recognise an old scaffold later and upgrade it. |
-| `.agents/tools/*.py` | same | `sync_plan.py`: set `BACKEND`, and implement only the chosen tracker's function. |
-| `.claude/commands/done.md` | same | Claude Code. |
-| `.cursor/commands/done.md` | same | Only if Cursor is used. |
-| `.github/prompts/done.prompt.md` | same | Only if Copilot is used. |
-| `.opencode/commands/done.md` | same | Only if OpenCode is used. |
+## Step 5 — Verify
 
-Only if the user said yes to question 10, also copy:
+Run `scripts/score.sh <project>`. Fix what fails and run it again. Tell the user in a few lines: what was created, how to close a task (`/done <id>`), and the suggested first commit `chore: add agent governance scaffold`. Several people: each reads `AGENTS.md` and `.agents/roles.md` first.
 
-| Copy from `templates/` | To | Notes |
-|---|---|---|
-| `.agents/plan-check/*` | same | The script and the report templates. Do not edit them. |
-| `.claude/commands/plan-check.md` | same | Claude Code. |
-| `.cursor/commands/plan-check.md` | same | Only if Cursor is used. |
-| `.github/prompts/plan-check.prompt.md` | same | Only if Copilot is used. |
-| `.opencode/commands/plan-check.md` | same | Only if OpenCode is used. |
+## Step 6 — Report (helps improve this scaffold)
 
-Then **tailor the command**: in each copied `plan-check` command replace the line `<!-- PROJECT-CHECKS -->` with 3–6 lines, one check each, derived from the profile. Each line is one read-only command (or file read) and a condition: print one short line under the report table only when it fails. Keep the script and the report table untouched. Pick from what fits this project:
-- has a gate → `{{GATE_CMD}}` passes on the base branch;
-- research project → `{{PY}} .agents/tools/check_adr.py --reports <the report/paper paths>` prints `OK`;
-- external tracker is not `none` → `{{PY}} .agents/tools/sync_plan.py push` shows no drift;
-- a task is `done` but its `review` is still `pending`;
-- an ADR is `proposed` while tasks that `depends` on its task are in progress;
-- docs-only → no gate line; check instead that every `mr` link in `plan.csv` of a done task is filled.
-Add to `AGENTS.md`, under "Working rules": `8. Standup: /plan-check compares plan.csv with git and every MR/PR, says on or behind schedule, and shows who blocks whom. Record a dependency with {{PY}} .agents/tools/plan.py set-deps <id> --depends "<id>;<id>".` and under "Reading the team record": `- Who blocks whom: depends and adr columns of plan.csv. /plan-check prints it.`
-Tell the user the report layout is in `.agents/plan-check/templates/plan-check.<lang>.md` and that a token in `PLAN_CHECK_TOKEN` (or `GITLAB_TOKEN` / `GITHUB_TOKEN`) makes MR open/closed state exact.
+Run `scripts/score.sh <project> --agent "<your tool>" --model "<your model id>" --write`, fill the **Self-report** in `.agents/state/init-report.md` honestly and briefly (what did not work, what was ambiguous, what you changed; no secrets), and tell the user it can be posted as an issue at the agent-gov repo. Never post it yourself.
 
-Adapt `done.md` (any variant): docs-only → delete step 2. Not in git (shared drive) → keep only steps 1, 5, 6, 7 and put the file link in the `mr` column. Copy the `done` command only for tools in use; if the tool has no custom commands, put the steps in `AGENTS.md` instead.
+## Upgrade
 
-## Step 5 — Verify and report
+1. Run `gov.sh upgrade <project>` (a dry run). Summarise it in at most ten lines and ask the user to apply it. Meaning of the lines: `ADD` new file, `UPDATE` replace an untouched file, `REMOVE` delete an untouched file that agent-gov dropped, `CONFLICT` the user changed it and the template changed, `ORPHAN` dropped by agent-gov but changed by the user (kept), `UNKNOWN`/`NEEDS-VARS` no manifest, so it cannot tell. Files agent-gov does not own (`record.md`, `action-history.md`, the user's own notes) are never touched.
+2. After the user agrees, run it again with `--apply`. **Limited mode** (no manifest, you saw a WARNING): offer to build a vars file from `detect` and the `AGENTS.md` profile (confirm the values) and run `upgrade ... --vars FILE --apply`, which fills `NEEDS-VARS` files and creates the manifest so the next upgrade is complete.
+3. For each `CONFLICT`: compare `<file>` and `<file>.agent-gov-new`, bring the new parts into the user's file keeping their content, then run `gov.sh record <project> <file>`.
+4. Do the **`Migrate:`** lines of `$REPO/CHANGELOG.md` for every version newer than the manifest's `version` (no manifest: from `0.8.1`). They are for you: they move content from old files to new ones (for example ADRs into `decisions-log.md`, a custom `record.md` into the wiki). Read only the files named, copy or summarise the content into the new place, ask before anything bigger than a few paragraphs, and **never delete the old file without asking**.
+5. Run `scripts/score.sh <project>` and report what changed.
 
-1. Run `{{PY}} .agents/tools/check_adr.py` (must print `OK`) and `{{PY}} .agents/tools/plan.py list` (must print the example row). Fix failures.
-2. `grep -rn "{{" AGENTS.md .agents .claude .cursor .github .opencode` must find nothing.
-3. Tracker not `none`: tell the user which TODO in `sync_plan.py` is left and which environment variables it needs.
-4. If `/plan-check` was installed: no `<!-- PROJECT-CHECKS -->` marker may remain, and `{{PY}} .agents/plan-check/plan_check.py --no-fetch` must print a report.
-5. Tell the user in a few lines: what was created, the four axes, how to close a task (`/done <id>`), suggested first commit `chore: add agent governance scaffold`. Do not commit.
-6. Several people: each reads `AGENTS.md` and `.agents/roles.md` first; `plan.csv` shows who does what, how far, reviewed or not.
+## Manual fallback (no script can run)
 
-## Step 6 — Score and report (helps improve this scaffold)
-
-1. From the project root run `{{PY}} <folder-of-init.md>/scripts/score_init.py . --agent "<your tool name>" --model "<your model id>" --write`. Fix any failed check you can fix, then re-run.
-2. Open `.agents/state/init-report.md` (git-ignored) and fill the **Self-report** section honestly and briefly: what did not work as written, what was ambiguous, what you changed. No secrets, no private project content.
-3. Tell the user the score and that the report can be posted as an issue at the agent-gov repo ("Init report" template) to help improve it. Never post it yourself.
+Say that this loses the manifest and automatic upgrades. Copy every file under `$REPO/templates/` to the same path in the project, never overwriting: `pointer.md` becomes `.github/copilot-instructions.md` (Copilot) and `GEMINI.md` (Gemini); `gitignore.append` lines are appended to `.gitignore`; skip `.agents/plan-check/` and the `plan-check` commands unless `PLAN_CHECK=yes`; copy only the `.claude/`, `.cursor/`, `.github/`, `.opencode/` command files of the tools in use. Replace every `{{KEY}}` with the value from Step 2 (`PY` = the Python command; `PLAN` = `bash .agents/tools/plan.sh` or `powershell -NoProfile -File .agents/tools/plan.ps1`). No `{{` may remain.

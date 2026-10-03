@@ -1,0 +1,3 @@
+@echo off
+rem Runs gov.ps1 with the execution policy bypassed. Usage: gov.cmd detect|scaffold|upgrade|record <project> ...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0gov.ps1" %*
