@@ -1,77 +1,47 @@
 #!/usr/bin/env bash
 # Install the /project-init command for one or more AI agents.
-#   install.sh [--agent claude,cursor,copilot,codex,gemini,opencode,all] [--project]
-#   (Windows: install.cmd / install.ps1 with -Agent, -Project, -Update)
-#   install.sh --update      pull the latest agent-gov (this clone) and show what changed
-# No --agent: asks (or uses claude when not run in a terminal).
-# User-wide install for claude also installs bin/claude-delete-session: it copies the tool to
-#   ~/.local/bin and adds the rule Bash(~/.local/bin/claude-delete-session) to ~/.claude/settings.json.
-# Default scope is user-wide; --project installs into the current directory.
+#
+#   install.sh --agent claude                    user-wide: writes only under your home folder
+#   install.sh --agent claude --project          this project only: writes only under the current folder
+#   install.sh --agent claude --uninstall [--project]   remove what this script wrote in that scope
+#
+# Agents: claude, cursor, copilot (project only), gemini, opencode, codex (deprecated), all, other.
+# A project install never touches your home folder, and a user-wide install never touches the
+# project. If a copy exists in the other scope it only warns (agents then list /project-init twice).
+# Both modes record this machine (OS, shell, Python) in <agent-gov>/.env. Windows: use install.cmd.
+# User-wide claude also installs bin/claude-delete-session into ~/.local/bin.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGENTS=""; PROJECT=0; UPDATE=0
+AGENTS=""; PROJECT=0; UNINSTALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --agent) AGENTS="${2:?--agent needs a value}"; shift 2 ;;
     --project) PROJECT=1; shift ;;
-    --update) UPDATE=1; shift ;;
-    -h|--help) sed -n 2,9p "$0"; exit 0 ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    -h|--help) sed -n 2,11p "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 
-if [ "$UPDATE" = 1 ]; then
-  git -C "$REPO" fetch --quiet
-  old="$(tr -d '[:space:]' < "$REPO/VERSION")"
-  if [ "$(git -C "$REPO" rev-list --count HEAD..@{u})" = 0 ]; then echo "already up to date ($old)"; exit 0; fi
-  git -C "$REPO" pull --ff-only --quiet
-  echo "updated $old -> $(tr -d '[:space:]' < "$REPO/VERSION")"
-  git -C "$REPO" diff --unified=0 HEAD@{1} HEAD -- CHANGELOG.md | grep '^+[^+]' | sed 's/^+//' || true
-  echo "projects already scaffolded: run /project-init in them to upgrade"
-  exit 0
+if [ "$PROJECT" = 1 ] && [ "$PWD" = "$REPO" ]; then
+  echo "run --project from your project's root folder, not from the agent-gov folder" >&2
+  exit 2
 fi
 
-install_delete_session() {
-  local bin="$HOME/.local/bin" settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
-  mkdir -p "$bin"
-  cp "$REPO/bin/claude-delete-session" "$bin/claude-delete-session"
-  chmod +x "$bin/claude-delete-session"
-  echo "installed delete-session: $bin/claude-delete-session"
-  if [ -f "$settings" ] && command -v python3 >/dev/null; then
-    python3 - "$settings" <<'PYEOF'
-import json, sys
-path = sys.argv[1]
-rule = "Bash(~/.local/bin/claude-delete-session)"
-try:
-    data = json.load(open(path))
-    allow = data.setdefault("permissions", {}).setdefault("allow", [])
-except (OSError, ValueError, AttributeError):
-    print(f"settings: {path} is not a JSON object, left unchanged; add {rule} to permissions.allow yourself")
-    sys.exit(0)
-if rule in allow:
-    print("settings: rule already present")
-else:
-    allow.append(rule)
-    json.dump(data, open(path, "w"), indent=2)
-    print(f"settings: added {rule} to {path}")
-PYEOF
-  else
-    echo "settings: $settings not found, nothing changed"
-  fi
-  case ":$PATH:" in *":$bin:"*) ;; *) echo "NOTE: add to ~/.bashrc or ~/.zshrc: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;; esac
-  echo "use: claude-delete-session   (inside Claude: !claude-delete-session)"
+# -- this machine: OS, shell, Python ---------------------------------------
+detect_os() {
+  case "$(uname -s)" in
+    Darwin) echo macos ;;
+    MINGW*|MSYS*|CYGWIN*) echo windows ;;
+    *) if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then echo wsl; else echo linux; fi ;;
+  esac
 }
-
-if [ -z "$AGENTS" ]; then
-  if [ -t 0 ]; then
-    read -r -p "Agent(s): claude, cursor, copilot, codex, gemini, opencode, other, all (comma separated) [claude]: " AGENTS
-  fi
-  AGENTS="${AGENTS:-claude}"
-fi
-[ "$AGENTS" = "all" ] && AGENTS="claude,cursor,copilot,codex,gemini,opencode"
+OS="$(detect_os)"
+if [ "$OS" = windows ]; then SHELL_KIND="git-bash"; else SHELL_KIND="$(basename "${SHELL:-bash}")"; fi
 
 # The first Python 3.8+ among python3, python, py (override the list with AGENT_GOV_PY_CANDIDATES).
+# Python is only needed for /plan-check and claude-delete-session.
 find_python() {
   local c cmd
   for c in ${AGENT_GOV_PY_CANDIDATES:-python3 python py}; do
@@ -82,77 +52,144 @@ find_python() {
   done
 }
 PY="$(find_python)"
-if [ -n "$PY" ]; then
-  PYNOTE="Python on this machine: \`$PY\`. Use it as {{PY}} in every command you write."
-  echo "python: $PY"
-else
-  PYNOTE="Python 3.8+ was NOT found on this machine (tried python3, python, py). Tell the user to install it: the scaffold scripts need it. Use \`python3\` as {{PY}} and follow init.md for the missing-Python case."
-  echo "WARNING: Python 3.8+ not found (tried python3, python, py). Install it; /plan-check and the other scripts need it." >&2
+[ -n "$PY" ] && echo "python: $PY" || echo "note: Python 3.8+ not found. /plan-check and claude-delete-session need it; everything else works without."
+
+# -- where each agent keeps custom commands --------------------------------
+# dir_for <agent> <user|project>  -> prints the directory, nothing if that scope is unsupported
+dir_for() {
+  local base
+  if [ "$2" = user ]; then
+    case "$1" in
+      claude)   echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands" ;;
+      cursor)   echo "$HOME/.cursor/commands" ;;
+      gemini)   echo "$HOME/.gemini/commands" ;;
+      opencode) echo "$HOME/.config/opencode/commands" ;;
+      codex)    echo "${CODEX_HOME:-$HOME/.codex}/prompts" ;;
+    esac
+  else
+    case "$1" in
+      claude)   echo "$PWD/.claude/commands" ;;
+      cursor)   echo "$PWD/.cursor/commands" ;;
+      copilot)  echo "$PWD/.github/prompts" ;;
+      gemini)   echo "$PWD/.gemini/commands" ;;
+      opencode) echo "$PWD/.opencode/commands" ;;
+    esac
+  fi
+}
+file_for() { case "$1" in copilot) echo project-init.prompt.md ;; gemini) echo project-init.toml ;; *) echo project-init.md ;; esac; }
+is_ours() { [ -f "$1" ] && grep -q "agent-governance scaffold" "$1"; }
+
+SCOPE=user; [ "$PROJECT" = 1 ] && SCOPE=project
+OTHER=project; [ "$SCOPE" = project ] && OTHER=user
+
+# -- which agents -----------------------------------------------------------
+if [ -z "$AGENTS" ]; then
+  if [ -t 0 ]; then
+    read -r -p "Agent(s): claude, cursor, copilot, gemini, opencode, codex, other, all (comma separated) [claude]: " AGENTS
+  fi
+  AGENTS="${AGENTS:-claude}"
 fi
+[ "$AGENTS" = "all" ] && AGENTS="claude,cursor,copilot,gemini,opencode"
+IFS=',' read -ra LIST <<< "$AGENTS"
 
 DESC="Set up the shared agent-governance scaffold (AGENTS.md, .agents/, /done) in this project"
-BODY="First run \`git -C $REPO fetch --quiet && git -C $REPO status -sb\`; if it is behind, tell the user in one line and ask to run \`$REPO/install.sh --update\` before continuing. Then read \`$REPO/init.md\` and follow it step by step. Templates are in \`$REPO/templates/\`. $PYNOTE
-The target is the project root, the directory this agent was opened in, never \`$REPO\` itself."
+BODY="Read \`$REPO/init.md\` and follow it step by step. The scripts and templates are in \`$REPO/\` (\`scripts/gov.sh\`, \`templates/\`). This machine's settings (shell, Python) are in \`$REPO/.env\`. Work only on the target project: the folder this agent was opened in, never \`$REPO\` itself, and do not change anything outside it."
 
-# scope_dir <project-relative dir> <user-wide dir or "">  -> prints the dir, or nothing if unsupported
-scope_dir() {
-  if [ "$PROJECT" = 1 ]; then echo "$PWD/$1"; elif [ -n "$2" ]; then echo "$2"; fi
+content_for() {  # content_for <agent>
+  case "$1" in
+    claude|opencode|codex) printf -- '---\ndescription: %s\n---\n%s\n' "$DESC" "$BODY" ;;
+    copilot) printf -- '---\ndescription: %s\nagent: agent\n---\n%s\n' "$DESC" "$BODY" ;;
+    gemini) printf 'description = "%s"\nprompt = """\n%s\n"""\n' "$DESC" "$BODY" ;;
+    *) printf '<!-- %s -->\n%s\n' "agent-governance scaffold: /project-init" "$BODY" ;;
+  esac
 }
 
-write() {  # write <dir> <file> <content>; dir may be empty = unsupported here
-  local agent="$1" dir="$2" file="$3" content="$4"
-  if [ -z "$dir" ]; then
-    echo "skipped $agent: no such scope (try --project or without it)" >&2; return
+install_delete_session() {
+  local bin="$HOME/.local/bin" settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+  local rule="Bash(~/.local/bin/claude-delete-session)"
+  mkdir -p "$bin"
+  cp "$REPO/bin/claude-delete-session" "$bin/claude-delete-session"
+  chmod +x "$bin/claude-delete-session"
+  echo "installed delete-session: $bin/claude-delete-session"
+  if [ ! -f "$settings" ]; then
+    echo "settings: $settings not found, nothing changed"
+  elif command -v jq >/dev/null; then
+    if jq -e --arg r "$rule" '(.permissions.allow // []) | index($r)' "$settings" >/dev/null 2>&1; then
+      echo "settings: rule already present"
+    elif jq --arg r "$rule" '.permissions //= {} | .permissions.allow //= [] | .permissions.allow += [$r]' "$settings" > "$settings.tmp" 2>/dev/null; then
+      mv "$settings.tmp" "$settings"; echo "settings: added $rule to $settings"
+    else
+      rm -f "$settings.tmp"; echo "WARNING: could not edit $settings; add $rule to permissions.allow yourself"
+    fi
+  else
+    echo "WARNING: jq not found, $settings left unchanged. To run claude-delete-session without a prompt, add \"$rule\" to permissions.allow yourself."
   fi
-  mkdir -p "$dir"; printf '%s\n' "$content" > "$dir/$file"
-  echo "installed $agent: $dir/$file"
+  case ":$PATH:" in *":$bin:"*) ;; *) echo "NOTE: add to ~/.bashrc or ~/.zshrc: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;; esac
+  echo "use it in a terminal: claude-delete-session   (at the Claude Code prompt: !claude-delete-session)"
 }
 
-HAS_CLAUDE=0
-IFS=',' read -ra LIST <<< "$AGENTS"
+write_env() {
+  cat > "$REPO/.env" <<ENV
+# Written by install.sh. This machine's settings for agent-gov; not committed.
+AGENT_GOV_REPO=$REPO
+AGENT_GOV_OS=$OS
+AGENT_GOV_SHELL=$SHELL_KIND
+AGENT_GOV_INSTALLER=install.sh
+AGENT_GOV_PY=${PY:-none}
+AGENT_GOV_AGENTS=$1
+ENV
+  echo "recorded this machine in $REPO/.env (os=$OS shell=$SHELL_KIND python=${PY:-none})"
+}
+
+HAS_CLAUDE=0; DONE=""
 for a in "${LIST[@]}"; do
   a="$(echo "$a" | tr -d ' ' | tr 'A-Z' 'a-z')"
   case "$a" in
-    claude)
-      HAS_CLAUDE=1
-      write claude "$(scope_dir .claude/commands "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands")" project-init.md \
-"---
-description: $DESC
----
-$BODY" ;;
-    cursor)
-      write cursor "$(scope_dir .cursor/commands "$HOME/.cursor/commands")" project-init.md "$BODY" ;;
-    copilot)  # VS Code prompt files: project only
-      write copilot "$( [ "$PROJECT" = 1 ] && echo "$PWD/.github/prompts" )" project-init.prompt.md \
-"---
-description: $DESC
-mode: agent
----
-$BODY" ;;
-    codex)    # Codex CLI custom prompts: user-wide only
-      write codex "$( [ "$PROJECT" = 0 ] && echo "${CODEX_HOME:-$HOME/.codex}/prompts" )" project-init.md \
-"---
-description: $DESC
----
-$BODY" ;;
-    gemini)
-      write gemini "$(scope_dir .gemini/commands "$HOME/.gemini/commands")" project-init.toml \
-"description = \"$DESC\"
-prompt = \"\"\"
-$BODY
-\"\"\"" ;;
-    opencode)
-      write opencode "$(scope_dir .opencode/commands "$HOME/.config/opencode/commands")" project-init.md "$BODY" ;;
-    other|"")
-      echo "other agent: no command file needed. Tell it: \"Read and follow $REPO/init.md\"" ;;
-    *) echo "unknown agent: $a (claude, cursor, copilot, codex, gemini, opencode, other)" >&2; exit 2 ;;
+    claude|cursor|copilot|gemini|opencode|codex) ;;
+    other|"") echo "other agent: no command file needed. Tell it: \"Read and follow $REPO/init.md\""; continue ;;
+    *) echo "unknown agent: $a (claude, cursor, copilot, gemini, opencode, codex, other)" >&2; exit 2 ;;
   esac
-done
-if [ "$HAS_CLAUDE" = 1 ]; then
-  if [ "$PROJECT" = 0 ]; then
-    install_delete_session
-  else
-    echo "skipped claude-delete-session: it is user-wide; run install.sh --agent claude without --project to add it"
+  dir="$(dir_for "$a" "$SCOPE")"
+  if [ -z "$dir" ]; then
+    case "$a" in
+      copilot) echo "copilot: it has no user-wide commands. Run: install.sh --agent copilot --project   (from your project)" ;;
+      codex)   echo "codex: its custom prompts are user-wide only. Run it without --project. (Codex deprecated custom prompts.)" ;;
+    esac
+    continue
   fi
+  file="$dir/$(file_for "$a")"
+
+  if [ "$UNINSTALL" = 1 ]; then
+    if is_ours "$file"; then rm -f "$file"; echo "removed $a: $file"; else echo "nothing of ours at $file"; fi
+    continue
+  fi
+
+  [ "$a" = codex ] && echo "note: Codex custom prompts are deprecated in favour of skills; this may stop working."
+  mkdir -p "$dir"; content_for "$a" > "$file"
+  echo "installed $a ($SCOPE): $file"
+  DONE="${DONE:+$DONE,}$a"
+  [ "$a" = claude ] && HAS_CLAUDE=1
+
+  other_dir="$(dir_for "$a" "$OTHER")"
+  if [ -n "$other_dir" ] && ! { [ "$OTHER" = project ] && [ "$PWD" = "$REPO" ]; } && is_ours "$other_dir/$(file_for "$a")"; then
+    flag=""; [ "$OTHER" = project ] && flag=" --project"
+    echo "WARNING: $a will list /project-init twice: another copy is at $other_dir/$(file_for "$a"). Remove it with: $REPO/install.sh --agent $a --uninstall$flag   (run it from the project for --project)"
+  fi
+done
+
+if [ "$UNINSTALL" = 1 ]; then
+  echo "(claude-delete-session in ~/.local/bin was left alone)"
+  exit 0
 fi
+
+if [ "$SCOPE" = user ]; then
+  # 0.7.0 wrote OpenCode's command to the wrong folder; that file is ours, so remove it.
+  old="$HOME/.opencode/commands/project-init.md"
+  if is_ours "$old"; then rm -f "$old"; echo "removed the misplaced file from 0.7.0: $old"; fi
+  [ "$HAS_CLAUDE" = 1 ] && install_delete_session
+elif [ "$HAS_CLAUDE" = 1 ]; then
+  echo "(project install: claude-delete-session is user-wide, so it was not installed; run install.sh --agent claude without --project for it)"
+fi
+
+write_env "$DONE"
 echo "restart your agent, then run /project-init (or the prompt above for 'other')"
