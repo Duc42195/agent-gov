@@ -18,12 +18,13 @@ Telling an open MR from a merged or closed one needs the host API. Put a token i
 (or GITLAB_TOKEN / GITHUB_TOKEN). Without it the tool still works from git alone and says so.
 
 Plan columns (header names, any order; extra columns are ignored):
-  id  title  owner  status  estimate  start  end  depends  adr
+  id  title  owner  status  estimate  start  end  depends
   status   todo | in-progress | done   ("To Do" / "In Progress" / "Done" also work)
   start/end  YYYY-MM-DD
   depends  ids this task waits on, separated by ";"     -> "who it blocks" is the inverse
-  adr      ADR numbers this task delivers, e.g. "0007;0009"
-           -> the task keeps blocking its dependants until those ADRs are no longer `proposed`
+
+The table order: on track -> the tasks of today, then the rest. Behind schedule -> first tasks that are
+late AND block others, then late tasks, then tasks that block others, then today's tasks and the rest.
 """
 import argparse
 import csv
@@ -43,14 +44,13 @@ MR_LAYOUTS = (  # GitLab, then GitHub: whichever host answers is used
     ("refs/pull/*/head", r"refs/pull/(\d+)/head"),
 )
 PLAN_CANDIDATES = ("plan.csv", ".agents/plan.csv", "docs/plan.csv")
-ADR_CANDIDATES = (".agents/adr", "docs/adr", "adr")
 BASE_CANDIDATES = ("origin/main", "origin/master", "origin/develop", "main", "master", "develop")
 STATUS_ALIASES = {"to-do": "todo", "todo": "todo", "in-progress": "in-progress", "doing": "in-progress", "done": "done"}
 ROW_KEYS = ("id", "title", "owner", "status", "est", "start", "end", "plan", "git", "progress", "blocks")
 REPORT_KEYS = ("date", "verdict", "summary", "sources", "table", "confirm")
 LABEL_KEYS = (
     "ok late n_late due mismatch blk_yes blk_no src sync_ok sync_stale sync_none sync_skip mrs mrs_unverified "
-    "nogit merged_todo done late_s waiting today no_mr future ontime review mism nocode merge leftover adr_wait confirm none"
+    "nogit merged_todo done late_s waiting today no_mr future ontime review mism nocode merge leftover confirm none"
 ).split()
 
 
@@ -265,7 +265,7 @@ def git_state(rows, forced_base, fetch):
     return meta, out
 
 
-# ---------------------------------------------------------------- plan + ADR
+# ---------------------------------------------------------------- plan
 
 def parse_date(value):
     try:
@@ -286,21 +286,6 @@ def load_plan(path):
         s = re.sub(r"[\s_]+", "-", r.get("status", "").lower())
         r["status"] = STATUS_ALIASES.get(s, "todo")
     return rows
-
-
-def adr_pending(token):
-    """Status text if the ADR is still `proposed` / has no status / is missing, else None (accepted, superseded)."""
-    m = re.search(r"\d+", token)
-    if not m:
-        return "?"
-    n = f"{int(m.group()):04d}"
-    for d in ADR_CANDIDATES:
-        for f in sorted((ROOT / d).glob(f"{n}-*.md")):
-            s = re.search(r"^\s*[-*]?\s*\**Status\**:?\**\s*\**\s*([A-Za-z][A-Za-z-]*)",
-                          f.read_text(encoding="utf-8", errors="replace"), re.I | re.M)
-            status = s.group(1).lower() if s else "no status"
-            return status if status in ("proposed", "no status") else None
-    return "missing"
 
 
 # ---------------------------------------------------------------- template
@@ -369,14 +354,13 @@ def main():
             for dep in split_ids(r.get("depends")):
                 dependants.setdefault(dep.lower(), []).append(r["id"])
 
-    order = {"late": 0, "today": 1, "mismatch": 1, "wait": 2, "adr": 3, "ok": 4, "future": 5}
+    rank = {"late": 0, "today": 1, "mismatch": 2, "wait": 2, "ok": 3, "future": 4}
     table, late, due_today, mism, cands, blocking, blocked = [], [], [], [], [], [], set()
     for r in rows:
         status = r["status"]
         st = res.get(r["id"], {"state": "N/A", "short": "", "commit": ""})
         delivered = st["state"] == "MERGED" if git_on else status == "done"
-        pending = {a: p for a in split_ids(r.get("adr")) if (p := adr_pending(a))}
-        if delivered and status == "done" and not pending:
+        if delivered and status == "done":
             continue
         if args.owner and r.get("owner", "") != args.owner:
             continue  # verdict, blockers and table all describe the same rows
@@ -384,8 +368,6 @@ def main():
         if delivered and status != "done":
             sched, kind = L["merged_todo"], "ok"
             cands.append(r["id"])
-        elif delivered:
-            sched, kind = L["done"], "adr"
         elif end and end < today:
             sched, kind = L["late_s"].format(d=(today - end).days), "late"
             if st["state"] in ("OPEN-MR", "PARTIAL"):
@@ -406,12 +388,13 @@ def main():
             due_today.append(r["id"])
         elif start and start > today:
             sched, kind = L["future"].format(d=f"{start:%d/%m}"), "future"
+        elif start and end and start <= today <= end:
+            sched, kind = L["ontime"], "today"  # inside its working window: a task of today
         else:
             sched, kind = L["ontime"], "ok"
 
-        cons = dependants.get(r["id"].lower(), []) if (not delivered or pending) else []
-        why = ", ".join(f"{a} ({p})" for a, p in pending.items())
-        block = (L["adr_wait"].format(x=why) if why else "") + ((" → " if why else "") + ", ".join(cons) if cons else "")
+        cons = dependants.get(r["id"].lower(), []) if not delivered else []
+        block = ", ".join(cons)
         if cons:
             blocking.append(r["id"])
             blocked.update(cons)
@@ -425,8 +408,18 @@ def main():
                      end=f"{end:%d/%m}" if end else L["none"],
                      plan=f"{start:%d/%m}→{end:%d/%m}" if start and end else L["none"],
                      git=git_cell, progress=sched, blocks=block or L["none"])
-        table.append((order[kind], end or today, {k: v.replace("|", "/") for k, v in cells.items()}))
-    table.sort(key=lambda x: (x[0], x[1]))
+        table.append((kind, bool(cons), end or today, {k: v.replace("|", "/") for k, v in cells.items()}))
+    behind = bool(late)
+
+    def sort_key(x):
+        kind, blocks, end, _cells = x
+        if not behind:
+            return (rank[kind], end)
+        lateness = kind == "late"
+        group = 0 if lateness and blocks else 1 if lateness else 2 if blocks else 3
+        return (group, rank[kind], end)
+
+    table.sort(key=sort_key)
 
     bits = []
     if late:
@@ -445,7 +438,7 @@ def main():
     else:
         sources = L["nogit"]
     n_cols = head_tpl.count("|") - 1
-    table_md = "\n".join([head_tpl, "|" + "---|" * n_cols] + [row_tpl.format(**c) for _o, _e, c in table])
+    table_md = "\n".join([head_tpl, "|" + "---|" * n_cols] + [row_tpl.format(**c) for _k, _b, _e, c in table])
     out = report_tpl.format(
         date=f"{today:%Y-%m-%d}", verdict=L["late"] if late else L["ok"], summary=" · ".join(bits), sources=sources,
         table=table_md, confirm=L["confirm"].format(ids=", ".join(cands)) if cands else "")

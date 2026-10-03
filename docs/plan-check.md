@@ -4,7 +4,9 @@ A daily standup check for any repo. It compares **the plan** with **the code** (
 open or merged MR/PR), checks **who each task blocks**, and returns one report:
 
 1. a verdict: **ON TRACK** or **BEHIND SCHEDULE**
-2. one task table, with the blockers as a column of that table
+2. one task table, with the blockers as a column of that table, in this order:
+   - **on track:** the tasks of today (inside their start-end window), then the remaining tasks;
+   - **behind schedule:** first the tasks that are late **and** block others, then the late tasks, then the tasks that block others, then today's tasks and the rest.
 
 Python standard library only. Read-only: it never edits your plan and never merges.
 
@@ -20,16 +22,15 @@ Sources: plan (5 tasks, 2 done) · origin/main head `ff7431f7` matches remote �
 | APP-3 | Implement the export endpoint | bob | 3d | 17/09→21/09 | OPEN-MR · MR !12 (behind 0) | 🔴 LATE +4d (MR waiting) | APP-4 |
 | APP-4 | Add export button to the UI | ann | 2d | 22/09→23/09 | NONE · no code yet | 🔴 LATE +2d | APP-5 |
 | APP-5 | Write the user guide | cara | 1d | 24/09→24/09 | NONE · no code yet | 🔴 LATE +1d | — |
-| APP-2 | Design the export API | bob | 1d | 16/09→16/09 | MERGED · merge ff7431f | ✅ done | waiting on ADR 0003 (proposed) → APP-3 |
+| APP-6 | Release notes | cara | 1d | 25/09→26/09 | NONE · no code yet | 🟢 on time | — |
 ```
 
 Reading it: a task is **late** only if its work is not merged yet. An open MR counts as "late, MR waiting",
-never as "not started". A task whose ADR is still `proposed` keeps blocking its dependants even when the
-task is done (APP-2 above).
+never as "not started". A task that is merged and `done` leaves the table.
 
 ## Install
 
-`/project-init` offers it (question 10) and copies `.agents/plan-check/` and the command for your agent. At the same time the agent fills the **Project checks** block of the command with 3-6 read-only checks that fit your project (gate green on base, result ADRs match reports, tracker drift, reviews still pending, ...). The script and the report table are never changed by that.
+`/project-init` offers it (question 10) and copies `.agents/plan-check/` and the command for your agent. Project-specific checks live in your own file, **`.agents/wiki/working-process.md`**, under `## Standup checks`: bullet lines such as "the gate passes on the default branch" or "a task is `done` but its `review` is `pending`". Init writes 3-6 of them to fit your project. `/plan-check` runs them (read-only) after the report and prints only the ones that fail. The script and the report table never change because of them, so upgrading agent-gov never conflicts with your checks.
 
 Then type `/plan-check` (or `/plan-check <owner>`). With any other tool, or in a terminal: `python3 .agents/plan-check/plan_check.py` (or `python`/`py -3`, whichever your machine has). If Python is missing, the command replies `Python 3.8+ not found` and stops.
 
@@ -37,7 +38,7 @@ Needs `git` and Python 3.8+. No packages.
 
 ## Your plan
 
-A CSV at `plan.csv`, `.agents/plan.csv` or `docs/plan.csv` (or pass `--plan FILE`). See `example/plan.csv`.
+A CSV at `plan.csv`, `.agents/plan.csv` or `docs/plan.csv` (or pass `--plan FILE`). See `templates/plan.csv`.
 Header names are case-insensitive, any order, extra columns are ignored. An Excel sheet exported as CSV works.
 
 | Column | Meaning |
@@ -47,10 +48,6 @@ Header names are case-insensitive, any order, extra columns are ignored. An Exce
 | `status` | `todo`, `in-progress` or `done` (`To Do`, `In Progress`, `Done` also work) |
 | `start`, `end` | `YYYY-MM-DD`; a task is late when `end` is before today and the work is not merged |
 | `depends` | ids this task waits on, separated by `;`. **Who a task blocks is the inverse of this column** |
-| `adr` | ADR numbers this task delivers, e.g. `0003;0007`. The task keeps blocking until each ADR is no longer `proposed` |
-
-ADRs are files named `NNNN-*.md` in `.agents/adr/`, `docs/adr/` or `adr/` with a `Status:` line
-(`- Status: proposed` and `- **Status:** **PROPOSED**` both work).
 
 ## Change what the report looks like
 
@@ -95,7 +92,7 @@ token in a file in the repo.
 
 - A task counts as merged only if its id is in a commit subject/body or MR title on the base branch. Put the task id
   in every commit subject. Without a token, a task merged only under another task's stacked MR reads as not merged.
-- `depends` and `adr` are written by people. The tool never guesses a dependency.
+- `depends` is written by people. The tool never guesses a dependency.
 - The newest 60 MR/PR heads are scanned.
 
 ## Files

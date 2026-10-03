@@ -74,7 +74,6 @@ mism = ⚠️ đánh dấu done, git không có
 nocode = chưa có code
 merge = merge {x}
 leftover = (MR !{n} vẫn nhắc tới, chưa xác minh còn mở)
-adr_wait = chờ ADR {x}
 none = —
 
 # dòng dưới bảng

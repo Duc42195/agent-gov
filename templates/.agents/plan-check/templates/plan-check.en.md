@@ -74,7 +74,6 @@ mism = ⚠️ marked done, not found in git
 nocode = no code yet
 merge = merge {x}
 leftover = (MR !{n} still lists it, not verified open)
-adr_wait = waiting on ADR {x}
 none = —
 
 # the line under the table

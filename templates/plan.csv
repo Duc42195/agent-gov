@@ -1,2 +1,2 @@
-id,title,owner,status,estimate,start,end,dod,mr,reviewer,review,updated,depends,adr,notes
-{{TASK_KEY}}-1,Replace this example with the first real task,,todo,1d,,,Definition of done goes here,,,,,,,
+id,title,owner,status,estimate,start,end,dod,mr,reviewer,review,updated,depends,notes
+{{TASK_KEY}}-1,Replace this example with the first real task,,todo,1d,,,Definition of done goes here,,,,,,
