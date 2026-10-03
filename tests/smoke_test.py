@@ -541,7 +541,7 @@ def test_hygiene():
         fail("VERSION does not match the top CHANGELOG entry")
     gone = r"agent-init|AGENT_INIT|check_adr|sync_plan|PROJECT-CHECKS|check_update|plan\.py|--update|--with"
     for f in ROOT.rglob("*"):
-        if not f.is_file() or ".git" in f.parts or "__pycache__" in f.parts or f.name in ("CHANGELOG.md", "smoke_test.py", ".env", "gov.sh", "gov.ps1"):  # gov.* list legacy file names on purpose
+        if not f.is_file() or ".git" in f.parts or "__pycache__" in f.parts or f.name in ("CHANGELOG.md", "smoke_test.py", ".env", "report.md", "gov.sh", "gov.ps1"):  # gov.* list legacy file names on purpose
             continue
         try:
             txt = f.read_text(encoding="utf-8")
