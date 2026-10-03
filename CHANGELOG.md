@@ -4,6 +4,38 @@ Newest first. Heading format `## X.Y.Z — YYYY-MM-DD` is read by the upgrade mo
 Lines starting with `Upgrade:` tell an already-scaffolded project what to change by hand or by agent.
 Version numbers follow the rule in the README ("Releasing"): patch = a fix that only replaces a script, minor = a feature or a change to files the project owns.
 
+## 0.9.0 — 2026-10-03
+Bigger release: installer scopes, a real upgrade path, bash instead of Python, ADRs removed. Projects keep working; `/project-init` brings them along.
+
+Install
+- `install.sh` / `install.ps1` / `install.cmd` have two scopes with a hard boundary: user-wide (default) writes only under your home folder; `--project` (`-Project`) writes only into the current folder and never touches your home. They no longer delete across scopes: a second copy only produces a warning, and `--uninstall` removes the copy you choose. A user-wide `--agent claude` still installs `claude-delete-session`; without `jq` it prints the settings rule instead of editing `settings.json` (no embedded Python any more).
+- The installer records OS, terminal and Python command in `<agent-gov>/.env`; the README says which command to run for which terminal.
+- Removed: all update checking (`--update` / `-Update` and the `git fetch` line in the generated command). Update the tool with `git pull`.
+- The generated command works only on the project folder and does not mention or call anything user-wide. Copilot prompt files use `agent: agent` (not `mode:`). OpenCode is in the support list ([docs/agents.md](docs/agents.md)), with how well each agent was checked.
+
+Upgrade engine
+- `scripts/gov.sh` (and `gov.ps1`): `detect`, `scaffold`, `upgrade`, `record`. `.agents/init-manifest` records, per file, the hash of the template last taken. `upgrade` plans first (dry run): `ADD`, `UPDATE` (untouched file), `REMOVE` (a dropped template you never changed), `CONFLICT` (you changed it and the template changed: yours is kept, the new one is written as `<file>.agent-gov-new`), `ORPHAN`, `KEEP`. Files agent-gov does not own are never touched. A project with no manifest runs in limited mode using the templates of the released tags. The decision is made from the files, not from the version number, so a project is no longer skipped because it already "is" the latest version.
+- `init.md` rewritten and shorter: `gov.sh detect` gathers facts, the agent shows the profile it assembled and asks only about what is missing; scripts do the copying (no agent tokens); upgrading is part of `/project-init`.
+
+Removed or replaced
+- ADRs are gone: decisions live in `.agents/wiki/decisions-log.md` (entries with `Topic:`, `Supersedes:`, and `Result:` for experiment results). Removed: `.agents/adr/`, `check_adr.py`, the `adr` column of `plan.csv`. The automatic run-id check for research reports no longer exists (the rule stays in `AGENTS.md`).
+- `plan.py` is replaced by `plan.sh list` (`plan.ps1`, `plan.cmd`); there are no edit commands any more: agents edit the cell in `plan.csv`. `sync_plan.py` (an unfinished stub) is removed. `score_init.py` is now `scripts/score.sh` (`score.ps1`).
+- Python is only needed for `/plan-check` and `claude-delete-session`.
+- `/plan-check`: no more `Project checks` block inside the command; it reads `## Standup checks` in `.agents/wiki/working-process.md`. The table shows today's tasks first when on track; when behind schedule: late and blocking, late, blocking, then today's tasks and the rest. ADR logic removed.
+- Folders: `tools/` split into `bin/` (machine tools) and `scripts/` (maintainer scripts); `docs/agents.md`, `docs/windows.md` added; README rewritten.
+
+Upgrade (run `/project-init` in the project; it does these by script)
+- Replace untouched generated files and add new ones (`.agents/tools/plan.sh`, `plan.ps1`, `plan.cmd`, the new `AGENTS.md`/commands as `.agent-gov-new` where you changed them); remove the untouched old `.agents/adr/README.md`, `0000-template.md`, `tools/check_adr.py`, `plan.py`, `sync_plan.py`.
+- Write `.agents/init-manifest` (from this release on, the manifest replaces `.agents/init-version`).
+
+Migrate (for the agent: copy or summarise, ask before anything big, never delete the old file without asking)
+- Migrate: each `.agents/adr/NNNN-*.md` becomes an entry in `.agents/wiki/decisions-log.md` (Topic, Decision, Why, `Result:` for `Type: result`, `Supersedes:` when superseded). Keep the ADR files until the user agrees to delete them.
+- Migrate: if `plan.csv` has an `adr` column with values, put them in `notes`, then drop the column.
+- Migrate: if `/plan-check` is installed, move the lines of the `## Project checks` block of your plan-check command to `## Standup checks` in `.agents/wiki/working-process.md` (bullet lines), then take the new command.
+- Migrate: `AGENTS.md`: replace commands that call `plan.py` by "edit the cell, then `<plan command> list`", and the ADR rules by the decision-log rules (the new text arrives as `AGENTS.md.agent-gov-new`).
+- Migrate: projects from 0.3.x with their own `record.md` / `action-history.md`: decisions into `decisions-log.md`, process gotchas into `working-process.md`; keep the originals.
+- Migrate: if a tracker was synced with `sync_plan.py`, write how to update it in `working-process.md`.
+
 ## 0.8.1 — 2026-10-03
 - Fix `claude-delete-session`: it crashed with `_curses.error: addnwstr() returned ERR` (it wrote into the bottom-right cell of the screen). Rewritten to behave like `claude -r`: it lists the sessions of the current folder, type to search (Vietnamese and any word order work), `Ctrl+A` all projects, `Ctrl+B` current branch, `Ctrl+V` preview, `Tab` mark, `Enter` delete after y/N, `Esc` quit.
 - It now reads the real session title (the latest `ai-title` record), no longer lists subagent transcripts as sessions, deletes the session's data folder with its file, warns when a session was modified in the last 5 minutes, and survives tiny or very wide terminals and `Ctrl+C`.
