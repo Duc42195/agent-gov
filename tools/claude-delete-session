@@ -1,279 +1,396 @@
 #!/usr/bin/env python3
 """
-claude-delete-session — Interactive Claude Code session manager (Linux/macOS)
+claude-delete-session - pick Claude Code sessions to delete, laid out like `claude -r`.
 
-  ↑↓ / PgUp/PgDn  Navigate
-  Type             Filter/search
-  SPACE            Toggle preview pane
-  TAB              Mark for multi-delete
-  ENTER            Delete (marked, or current if none marked)
-  ESC / q          Cancel
+Shows the sessions of the CURRENT project (the directory you run it in), newest first.
 
-No external dependencies — Python stdlib only (curses).
-Run directly or via: !~/.local/bin/claude-delete-session
+  type            search (words may be in any order; Vietnamese works)
+  Up/Down, PgUp/PgDn, Home/End, Ctrl+P / Ctrl+N   move
+  Ctrl+A          switch between this project and ALL projects
+  Ctrl+B          only sessions on the current git branch
+  Ctrl+V          preview the conversation
+  Tab             mark / unmark (marks several), then move down
+  Enter           delete the marked sessions (or the highlighted one), after a y/N question
+  Esc             clear the search, or quit if it is empty (Ctrl+C quits at once)
+
+  claude-delete-session [--all] [--dir PATH]
+
+Run it in a normal terminal. Inside Claude Code type  !claude-delete-session  at the Claude
+prompt; in bash the leading ! means "repeat an earlier command", so do not type it there.
+Python standard library only (curses: Linux, macOS, WSL; on Windows use the .ps1 version).
 """
-import curses
+import argparse
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
+import time
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
-PROJECTS = Path.home() / ".claude" / "projects"
+try:
+    import curses
+except ImportError:  # Windows Python has no curses
+    curses = None
+
+PROJECTS = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
+TITLE_RX = re.compile(rb'"aiTitle":\s*"((?:[^"\\]|\\.)*)"')
+BRANCH_RX = re.compile(rb'"gitBranch":\s*"((?:[^"\\]|\\.)*)"')
+CWD_RX = re.compile(rb'"cwd":\s*"((?:[^"\\]|\\.)*)"')
+RECENT_SECONDS = 300
 
 
-# ── helpers ────────────────────────────────────────────────────────────────
+# -- helpers ---------------------------------------------------------------
 
-def shorten_project(name: str) -> str:
-    s = re.sub(r"^-home-[^-]+-", "~/", name).replace("-", "/")
-    return ("…" + s[-27:]) if len(s) > 30 else s
+def encode_project(path):
+    """Claude Code names a project folder after its path, every non-alphanumeric char as '-'."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
-def get_title(path: Path) -> str:
+def cell_width(ch):
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def text_width(text):
+    return sum(cell_width(c) for c in text)
+
+
+def fit(text, width, pad=True):
+    """Cut text to `width` terminal cells (and pad with spaces), counting wide/combining chars."""
+    out, used = [], 0
+    for ch in text:
+        w = cell_width(ch)
+        if used + w > width:
+            break
+        out.append(ch)
+        used += w
+    return "".join(out) + (" " * (width - used) if pad else "")
+
+
+def unjson(raw):
     try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for i, line in enumerate(f):
-                if i > 80:
-                    break
-                try:
-                    o = json.loads(line)
-                    for k in ("leafSummary", "summary", "title", "sessionTitle"):
-                        v = o.get(k, "")
-                        if isinstance(v, str) and v.strip():
-                            return v.strip()[:100]
-                    if o.get("type") == "user":
-                        c = o.get("message", {}).get("content", "")
-                        t = (
-                            " ".join(x.get("text", "") for x in c if isinstance(x, dict))
-                            if isinstance(c, list)
-                            else str(c)
-                        )
-                        t = t.strip().replace("\n", " ")
-                        if t:
-                            return t[:100]
-                except Exception:
-                    pass
-    except Exception:
-        pass
+        return json.loads(b'"' + raw + b'"')
+    except ValueError:
+        return raw.decode("utf-8", "replace")
+
+
+def human_size(n):
+    for unit in ("B", "K", "M", "G"):
+        if n < 1024 or unit == "G":
+            return f"{n:.0f}{unit}" if unit in ("B", "K") else f"{n:.1f}{unit}"
+        n /= 1024
+
+
+def ago(ts):
+    s = max(0, time.time() - ts)
+    for limit, div, unit in ((60, 1, "s"), (3600, 60, "m"), (86400, 3600, "h"), (86400 * 30, 86400, "d")):
+        if s < limit:
+            return f"{int(s // div)}{unit} ago"
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+
+
+def first_user_text(data):
+    for line in data.splitlines():
+        if b'"user"' not in line:
+            continue
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        c = o.get("message", {}).get("content", "")
+        t = " ".join(x.get("text", "") for x in c if isinstance(x, dict)) if isinstance(c, list) else str(c)
+        t = " ".join(t.split())
+        if t:
+            return t
     return ""
 
 
-def get_sessions() -> list[dict]:
+def read_meta(path):
+    """Title (the latest ai-title record, which may be far from the top), branch and cwd of a session file."""
+    size = path.stat().st_size
+    with open(path, "rb") as f:
+        if size > 40 * 1024 * 1024:  # huge session: head and tail only
+            head = f.read(4 * 1024 * 1024)
+            f.seek(-4 * 1024 * 1024, os.SEEK_END)
+            data = head + f.read()
+        else:
+            data = f.read()
+    titles = TITLE_RX.findall(data)
+    title = unjson(titles[-1]) if titles else first_user_text(data[:2 * 1024 * 1024])
+    b, c = BRANCH_RX.search(data), CWD_RX.search(data)
+    return " ".join(title.split()), unjson(b.group(1)) if b else "", unjson(c.group(1)) if c else ""
+
+
+def project_label(name):
+    s = re.sub(r"^-home-[^-]+-", "~/", name)
+    return s.replace("-", "/") if s.startswith("~/") else name
+
+
+def get_sessions():
     rows = []
-    for f in PROJECTS.rglob("*.jsonl"):
-        if not f.is_file():
+    if not PROJECTS.is_dir():
+        return rows
+    for pdir in PROJECTS.iterdir():
+        if not pdir.is_dir():
             continue
-        st = f.stat()
-        rows.append(
-            dict(
-                id=f.stem,
-                proj=shorten_project(f.parent.name),
-                file=f,
-                mtime=st.st_mtime,
-                title=get_title(f),
-            )
-        )
-    return sorted(rows, key=lambda x: x["mtime"], reverse=True)
+        for f in pdir.glob("*.jsonl"):  # top level only: subagent transcripts live deeper
+            try:
+                st = f.stat()
+                title, branch, cwd = read_meta(f)
+            except OSError:
+                continue
+            side = f.with_suffix("")
+            extra = sum(p.stat().st_size for p in side.rglob("*") if p.is_file()) if side.is_dir() else 0
+            rows.append(dict(id=f.stem, pdir=pdir.name, proj=project_label(pdir.name), file=f, side=side,
+                             mtime=st.st_mtime, size=st.st_size + extra, title=title, branch=branch, cwd=cwd))
+    return sorted(rows, key=lambda r: r["mtime"], reverse=True)
 
 
-def get_preview(path: Path) -> list[str]:
-    lines = [f"File : {path}", f"Size : {path.stat().st_size // 1024} KB", ""]
+def get_preview(path, limit=40):
+    lines = [f"File: {path}", f"Size: {path.stat().st_size // 1024} KB", ""]
     n = 0
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
-                if n >= 30:
+                if n >= limit:
                     break
                 try:
                     o = json.loads(line)
-                    tp = o.get("type", "")
-                    if tp not in ("user", "assistant"):
-                        continue
-                    c = o.get("message", {}).get("content", "")
-                    t = (
-                        " ".join(x.get("text", "") for x in c if isinstance(x, dict))
-                        if isinstance(c, list)
-                        else str(c)
-                    )
-                    t = t.strip().replace("\n", " ")
-                    if t:
-                        lines.append(("▶ " if tp == "user" else "  ") + t[:300])
-                        n += 1
-                except Exception:
-                    pass
-    except Exception as e:
+                except ValueError:
+                    continue
+                kind = o.get("type", "")
+                if kind not in ("user", "assistant"):
+                    continue
+                c = o.get("message", {}).get("content", "")
+                t = " ".join(x.get("text", "") for x in c if isinstance(x, dict)) if isinstance(c, list) else str(c)
+                t = " ".join(t.split())
+                if t:
+                    lines.append(("> " if kind == "user" else "  ") + t[:400])
+                    n += 1
+    except OSError as e:
         lines.append(f"Error: {e}")
-    return lines or ["(empty)"]
+    return lines
 
 
-# ── TUI ────────────────────────────────────────────────────────────────────
+def current_branch(cwd):
+    r = subprocess.run(["git", "-C", cwd, "branch", "--show-current"], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
 
-def run_tui(stdscr, sessions: list[dict]) -> list[dict]:
+
+def norm(s):
+    return unicodedata.normalize("NFC", s).casefold()
+
+
+# -- TUI -------------------------------------------------------------------
+
+def put(win, y, x, text, width, attr=0):
+    """Draw text clipped to `width` cells. Never touches the bottom-right cell (curses raises ERR there)."""
+    h, w = win.getmaxyx()
+    if y < 0 or y >= h or x >= w:
+        return
+    width = min(width, w - x - (1 if y == h - 1 else 0))
+    if width <= 0:
+        return
+    try:
+        win.addstr(y, x, fit(text, width), attr)
+    except curses.error:
+        pass
+
+
+def run_tui(stdscr, sessions, here, start_all, branch):
     curses.curs_set(0)
-    curses.use_default_colors()
-    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)  # selected row
-    curses.init_pair(2, curses.COLOR_YELLOW, -1)                 # marked row
-    curses.init_pair(3, curses.COLOR_CYAN, -1)                   # header / footer
-
-    cur = 0
-    offset = 0
-    search = ""
-    marked: set[str] = set()
-    show_prev = False
-    plines: list[str] = []
-    prev_id: str | None = None
+    try:
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
+        curses.init_pair(2, curses.COLOR_YELLOW, -1)
+        curses.init_pair(3, curses.COLOR_CYAN, -1)
+        curses.init_pair(4, -1, -1)
+    except curses.error:
+        pass
+    sel_attr, mark_attr, bar_attr = curses.color_pair(1), curses.color_pair(2), curses.color_pair(3)
+    in_project = [s for s in sessions if s["pdir"] == here]
+    show_all = start_all or not in_project
+    note = "" if (start_all or in_project) else "no sessions for this folder: showing all projects"
+    by_branch = False
+    search, cur, top = "", 0, 0
+    marked = set()
+    preview, prev_id, plines = False, None, []
 
     while True:
-        stdscr.erase()
         H, W = stdscr.getmaxyx()
-        bh = H - 3  # body height (rows available for list)
-
-        q = search.lower()
-        fil = (
-            [s for s in sessions if q in (s["title"] + s["proj"] + s["id"]).lower()]
-            if q
-            else sessions
-        )
-        if cur >= len(fil):
-            cur = max(0, len(fil) - 1)
-
-        lw = W // 2 if (show_prev and fil) else W
-        pw = W - lw - 1
-
-        # header
-        hdr = (
-            f"  claude-delete-session  {len(fil)} session(s)"
-            + (f"  {len(marked)} marked" if marked else "")
-        )
-        stdscr.attron(curses.color_pair(3))
-        stdscr.addnstr(0, 0, hdr.ljust(W), W)
-        stdscr.attroff(curses.color_pair(3))
-
-        # scroll
-        if offset > cur:
-            offset = cur
-        elif cur >= offset + bh:
-            offset = cur - bh + 1
-
-        # list rows
-        for i, s in enumerate(fil[offset : offset + bh]):
-            y = i + 1
-            idx = i + offset
-            dot = "●" if s["id"] in marked else " "
-            ds = datetime.fromtimestamp(s["mtime"]).strftime("%m-%d %H:%M")
-            row = f"{dot} {ds}  {s['proj']:<18}  {s['title'] or '(no title)'}"
+        stdscr.erase()
+        if H < 6 or W < 30:
+            put(stdscr, 0, 0, "terminal too small", W)
+            stdscr.refresh()
             try:
-                if idx == cur:
-                    stdscr.attron(curses.color_pair(1))
-                    stdscr.addnstr(y, 0, row.ljust(lw), lw)
-                    stdscr.attroff(curses.color_pair(1))
-                elif s["id"] in marked:
-                    stdscr.attron(curses.color_pair(2))
-                    stdscr.addnstr(y, 0, row, lw)
-                    stdscr.attroff(curses.color_pair(2))
-                else:
-                    stdscr.addnstr(y, 0, row, lw)
-            except curses.error:
-                pass
+                k = stdscr.get_wch()
+            except KeyboardInterrupt:
+                return []
+            if k in ("\x1b", "\x03"):
+                return []
+            continue
 
-        # preview pane
-        if show_prev and fil:
-            for y in range(1, H - 2):
-                try:
-                    stdscr.addch(y, lw, "│")
-                except curses.error:
-                    pass
-            cs = fil[cur]
-            if cs["id"] != prev_id:
-                plines = get_preview(cs["file"])
-                prev_id = cs["id"]
-            for i, pl in enumerate(plines[:bh]):
-                try:
-                    stdscr.addnstr(i + 1, lw + 1, pl, pw)
-                except curses.error:
-                    pass
+        pool = sessions if show_all else in_project
+        if by_branch and branch:
+            pool = [s for s in pool if s["branch"] == branch]
+        terms = norm(search).split()
+        rows = [s for s in pool if all(t in norm(" ".join((s["title"], s["proj"], s["branch"], s["id"]))) for t in terms)]
+        cur = min(cur, max(0, len(rows) - 1))
+        body = H - 3
+        if cur < top:
+            top = cur
+        elif cur >= top + body:
+            top = cur - body + 1
 
-        # search bar
-        stdscr.addnstr(H - 2, 0, f"  Search: {search}_".ljust(W), W)
+        scope = "all projects" if show_all else "this project"
+        head = f" Delete sessions - {scope}" + (f" - branch {branch}" if by_branch and branch else "")
+        head += f" - {len(rows)} shown" + (f" - {len(marked)} marked" if marked else "") + (f"  ({note})" if note else "")
+        put(stdscr, 0, 0, head, W, bar_attr)
 
-        # footer
-        foot = "  ↑↓=move  TAB=mark  ENTER=delete  SPACE=preview  ESC=quit"
-        stdscr.attron(curses.color_pair(3))
-        stdscr.addnstr(H - 1, 0, foot.ljust(W), W)
-        stdscr.attroff(curses.color_pair(3))
+        list_w = W // 2 if (preview and rows) else W
+        for i, s in enumerate(rows[top:top + body]):
+            idx, y = top + i, i + 1
+            mark = "*" if s["id"] in marked else " "
+            cols = [mark, fit(ago(s["mtime"]), 8), fit(human_size(s["size"]), 6)]
+            if s["branch"]:
+                cols.append(fit(s["branch"], 14))
+            else:
+                cols.append(fit("", 14))
+            if show_all:
+                cols.append(fit(s["proj"], 22))
+            cols.append(s["title"] or "(no title)")
+            line = " ".join(cols)
+            attr = sel_attr if idx == cur else (mark_attr if s["id"] in marked else 0)
+            put(stdscr, y, 0, line, list_w, attr)
 
+        if preview and rows:
+            for y in range(1, body + 1):
+                put(stdscr, y, list_w, "|", 1)
+            if rows[cur]["id"] != prev_id:
+                plines, prev_id = get_preview(rows[cur]["file"]), rows[cur]["id"]
+            for i, pl in enumerate(plines[:body]):
+                put(stdscr, i + 1, list_w + 2, pl, W - list_w - 2)
+
+        put(stdscr, H - 2, 0, "  Search: " + search + "_", W)
+        foot = "  type=search  Up/Down  Tab=mark  Enter=delete  ^A=all projects  ^B=branch  ^V=preview  Esc=quit"
+        put(stdscr, H - 1, 0, foot if text_width(foot) < W else "  Tab=mark Enter=delete ^A=all Esc=quit", W, bar_attr)
         stdscr.refresh()
 
         try:
-            k = stdscr.getch()
+            k = stdscr.get_wch()
         except KeyboardInterrupt:
             return []
-
-        if k in (27, ord("q")):
+        except curses.error:
+            continue
+        if k == curses.KEY_RESIZE:
+            continue
+        note = ""
+        if k == "\x03":
             return []
-        elif k == curses.KEY_UP:
+        if k == "\x1b":
+            if search:
+                search, cur = "", 0
+                continue
+            return []
+        if k in (curses.KEY_UP, "\x10"):
             cur = max(0, cur - 1)
-        elif k == curses.KEY_DOWN:
-            cur = min(len(fil) - 1, cur + 1)
+        elif k in (curses.KEY_DOWN, "\x0e"):
+            cur = min(len(rows) - 1, cur + 1) if rows else 0
         elif k == curses.KEY_PPAGE:
-            cur = max(0, cur - bh)
+            cur = max(0, cur - body)
         elif k == curses.KEY_NPAGE:
-            cur = min(len(fil) - 1, cur + bh)
-        elif k == ord(" "):
-            show_prev = not show_prev
-        elif k == ord("\t"):
-            if fil:
-                sid = fil[cur]["id"]
-                if sid in marked:
-                    marked.discard(sid)
-                else:
-                    marked.add(sid)
-                cur = min(len(fil) - 1, cur + 1)
-        elif k in (10, 13):  # ENTER
-            sel = [s for s in fil if s["id"] in marked] or (
-                [fil[cur]] if fil else []
-            )
-            return sel
-        elif k in (curses.KEY_BACKSPACE, 127):
-            search = search[:-1]
+            cur = min(len(rows) - 1, cur + body) if rows else 0
+        elif k == curses.KEY_HOME:
             cur = 0
-        elif 33 <= k < 127:
-            search += chr(k)
-            cur = 0
+        elif k == curses.KEY_END:
+            cur = max(0, len(rows) - 1)
+        elif k == "\x01":
+            show_all, cur, top = not show_all, 0, 0
+        elif k == "\x02":
+            if branch:
+                by_branch, cur, top = not by_branch, 0, 0
+            else:
+                note = "not in a git repository"
+        elif k == "\x16":
+            preview = not preview
+        elif k == "\x15":
+            search, cur = "", 0
+        elif k == "\t":
+            if rows:
+                sid = rows[cur]["id"]
+                marked.symmetric_difference_update({sid})
+                cur = min(len(rows) - 1, cur + 1)
+        elif k in ("\n", "\r", curses.KEY_ENTER):
+            chosen = [s for s in sessions if s["id"] in marked] or ([rows[cur]] if rows else [])
+            return chosen
+        elif k in (curses.KEY_BACKSPACE, "\x7f", "\b"):
+            search, cur = search[:-1], 0
+        elif isinstance(k, str) and k.isprintable():
+            search, cur = search + k, 0
 
-    return []
+
+# -- main ------------------------------------------------------------------
+
+def safe_inside(path):
+    root = os.path.realpath(PROJECTS)
+    p = os.path.realpath(path)
+    return p != root and os.path.commonpath([root, p]) == root
 
 
-# ── main ───────────────────────────────────────────────────────────────────
+def main():
+    ap = argparse.ArgumentParser(description="Pick Claude Code sessions to delete (like `claude -r`).")
+    ap.add_argument("--all", action="store_true", help="start with all projects, not just this folder")
+    ap.add_argument("--dir", default=os.getcwd(), help="project folder to show (default: the current folder)")
+    args = ap.parse_args()
 
-def main() -> None:
-    if not PROJECTS.exists():
-        print(f"Directory not found: {PROJECTS}")
-        sys.exit(1)
-
+    if curses is None:
+        sys.exit("curses is not available here (Windows Python). Use claude-delete-session.ps1 instead.")
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        sys.exit("run this in a terminal (it is interactive)")
+    if not PROJECTS.is_dir():
+        sys.exit(f"Directory not found: {PROJECTS}")
     sessions = get_sessions()
     if not sessions:
-        print("No sessions found in ~/.claude/projects/")
-        return
+        sys.exit(f"No sessions found in {PROJECTS}")
 
-    selected = curses.wrapper(run_tui, sessions)
-
+    os.environ.setdefault("ESCDELAY", "25")
+    here = encode_project(os.path.realpath(args.dir))
+    try:
+        selected = curses.wrapper(run_tui, sessions, here, args.all, current_branch(args.dir))
+    except KeyboardInterrupt:
+        selected = []
     if not selected:
         print("Cancelled.")
         return
 
     print(f"\nDelete {len(selected)} session(s):")
+    total, recent = 0, False
     for s in selected:
-        ds = datetime.fromtimestamp(s["mtime"]).strftime("%Y-%m-%d %H:%M")
-        print(f"  {ds}  {s['proj']}  {(s['title'] or '(no title)')[:60]}")
-
-    ans = input("\nConfirm [y/N]: ").strip().lower()
-    if ans == "y":
-        for s in selected:
-            s["file"].unlink(missing_ok=True)
-            print(f"  Deleted: {s['id'][:12]}…")
-    else:
+        total += s["size"]
+        when = datetime.fromtimestamp(s["mtime"]).strftime("%Y-%m-%d %H:%M")
+        is_recent = time.time() - s["mtime"] < RECENT_SECONDS
+        recent = recent or is_recent
+        print(f"  {when}  {human_size(s['size']):>6}  {s['proj']}  {(s['title'] or '(no title)')[:60]}"
+              + ("   <- modified in the last 5 minutes, may be a running session" if is_recent else ""))
+    print(f"  total {human_size(total)} (the session file and its data folder)")
+    if recent:
+        print("  Deleting a session that is still open can lose what you are doing in it.")
+    if input("\nConfirm [y/N]: ").strip().lower() != "y":
         print("Aborted.")
+        return
+    for s in selected:
+        if not (safe_inside(s["file"]) and (not s["side"].exists() or safe_inside(s["side"]))):
+            print(f"  Skipped (outside {PROJECTS}): {s['file']}")
+            continue
+        s["file"].unlink(missing_ok=True)
+        if s["side"].is_dir():
+            shutil.rmtree(s["side"], ignore_errors=True)
+        print(f"  Deleted: {s['id'][:12]}...")
 
 
 if __name__ == "__main__":

@@ -3,12 +3,14 @@
 
   python tests/smoke_test.py
 """
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -214,6 +216,92 @@ def main():
     if r.returncode != 2:
         failures.append("the removed --with option was accepted")
     shutil.rmtree(home, ignore_errors=True)
+
+    # claude-delete-session in a pseudo terminal: scoping, search, deletion, and no curses crash
+    try:
+        import fcntl, pty, select, struct, termios
+    except ImportError:
+        pty = None
+    if pty:
+        def encode(p):
+            return re.sub(r"[^A-Za-z0-9]", "-", str(p))
+
+        home = Path(tempfile.mkdtemp())
+        proj = home / "work" / "app"
+        proj.mkdir(parents=True)
+
+        def make(pdir, sid, title, age):
+            d = home / ".claude/projects" / encode(pdir)
+            d.mkdir(parents=True, exist_ok=True)
+            f = d / f"{sid}.jsonl"
+            f.write_text(json.dumps({"type": "user", "cwd": str(pdir), "gitBranch": "main", "message": {"content": "hi"}})
+                         + "\n" + json.dumps({"type": "ai-title", "aiTitle": title}) + "\n")
+            os.utime(f, (time.time() - age, time.time() - age))
+            return f
+
+        a_ = make(proj, "aaaa", "T\u1ed1i \u01b0u tri\u1ec3n khai", 7200)
+        side = a_.with_suffix("")
+        (side / "subagents").mkdir(parents=True)
+        (side / "data.txt").write_text("x")
+        (side / "subagents" / "agent.jsonl").write_text(json.dumps({"type": "ai-title", "aiTitle": "SUBONLY"}) + "\n")
+        b_ = make(proj, "bbbb", "Second session", 9000)
+        c_ = make(home / "other", "cccc", "Other project OTHERONLY", 9000)
+
+        def tui(keys, rows=24, cols=80):
+            m, sl = pty.openpty()
+            fcntl.ioctl(sl, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+            env = dict(os.environ, HOME=str(home), TERM="xterm")
+            env.pop("CLAUDE_CONFIG_DIR", None)
+            pr = subprocess.Popen([sys.executable, str(ROOT / "tools/claude-delete-session")], stdin=sl, stdout=sl,
+                                  stderr=sl, cwd=proj, env=env, close_fds=True)
+            os.close(sl)
+            out = b""
+
+            def drain(sec):
+                nonlocal out
+                end = time.time() + sec
+                while time.time() < end:
+                    if select.select([m], [], [], 0.05)[0]:
+                        try:
+                            d = os.read(m, 65536)
+                        except OSError:
+                            return
+                        if not d:
+                            return
+                        out += d
+
+            drain(0.8)
+            for k in keys:
+                os.write(m, k.encode())
+                drain(0.4)
+            drain(0.6)
+            try:
+                rc = pr.wait(3)
+            except subprocess.TimeoutExpired:
+                pr.kill()
+                rc = "timeout"
+            os.close(m)
+            return rc, out.decode("utf-8", "replace")
+
+        for name, keys, kw, check in (
+            ("ctrl+A then esc", ["\x01", "\x1b"], {}, lambda o: "Cancelled." in o),
+            ("very wide terminal", ["\x01", "\x1b"], {"cols": 1000}, lambda o: "Cancelled." in o),
+            ("terminal too small", ["\x1b"], {"rows": 5, "cols": 20}, lambda o: "Cancelled." in o),
+            ("other project hidden by default", ["OTHERONLY", "\n"], {}, lambda o: "Cancelled." in o),
+            ("subagent transcript not listed", ["SUBONLY", "\n"], {}, lambda o: "Cancelled." in o),
+        ):
+            rc, out = tui(keys, **kw)
+            if rc != 0 or "Traceback" in out or not check(out):
+                failures.append(f"claude-delete-session [{name}]: rc={rc} {out[-300:]!r}")
+        if not c_.exists():
+            failures.append("claude-delete-session deleted a session of another project")
+        rc, out = tui(["\x01", "OTHERONLY", "\n", "n\n"])
+        if rc != 0 or "Aborted." not in out or not c_.exists():
+            failures.append(f"claude-delete-session: answering n must keep the session: {out[-200:]!r}")
+        rc, out = tui(["t\u1ed1i", "\n", "y\n"])
+        if rc != 0 or "Deleted" not in out or a_.exists() or side.exists() or not b_.exists():
+            failures.append(f"claude-delete-session: Vietnamese search + delete: rc={rc} {out[-300:]!r}")
+        shutil.rmtree(home, ignore_errors=True)
 
     # python detection: installer bakes the interpreter into the command, or warns when there is none
     for cands, want_in_cmd, want_warn in (("python3", "Python on this machine: `python3`", False),

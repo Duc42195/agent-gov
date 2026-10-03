@@ -4,6 +4,13 @@ Newest first. Heading format `## X.Y.Z — YYYY-MM-DD` is read by the upgrade mo
 Lines starting with `Upgrade:` tell an already-scaffolded project what to change by hand or by agent.
 Version numbers follow the rule in the README ("Releasing"): patch = a fix that only replaces a script, minor = a feature or a change to files the project owns.
 
+## 0.8.1 — 2026-10-03
+- Fix `claude-delete-session`: it crashed with `_curses.error: addnwstr() returned ERR` (it wrote into the bottom-right cell of the screen). Rewritten to behave like `claude -r`: it lists the sessions of the current folder, type to search (Vietnamese and any word order work), `Ctrl+A` all projects, `Ctrl+B` current branch, `Ctrl+V` preview, `Tab` mark, `Enter` delete after y/N, `Esc` quit.
+- It now reads the real session title (the latest `ai-title` record), no longer lists subagent transcripts as sessions, deletes the session's data folder with its file, warns when a session was modified in the last 5 minutes, and survives tiny or very wide terminals and `Ctrl+C`.
+- README: in bash `!claude-delete-session` repeats an earlier command (that is why it ran `claude -r...`); the `!` is for the Claude Code prompt.
+- The smoke test drives the tool in a pseudo terminal. The Windows `.ps1` is unchanged (old all-projects list).
+- Upgrade: none for projects. Re-copy `tools/claude-delete-session` to `~/.local/bin` (run `install.sh --agent claude`).
+
 ## 0.8.0 — 2026-10-03
 - Windows installer: `install.cmd` / `install.ps1` (`-Agent`, `-Project`, `-Update`), same agents and Python detection as `install.sh` (`py -3`, `python`, `python3`). For `claude` it copies `tools\claude-delete-session.ps1` to `~\.local\bin` and does not edit `settings.json`. Not yet tested on a real Windows machine.
 - Fix: the user-wide OpenCode command directory is `~/.config/opencode/commands/`, not `~/.opencode/commands/` (0.7.0 wrote to the wrong place, so OpenCode never saw `/project-init`). The project directory `.opencode/commands/` was already right.
