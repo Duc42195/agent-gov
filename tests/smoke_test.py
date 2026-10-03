@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""Smoke test: scaffold templates into an empty dir the way init.md says, then run the checks.
+"""Smoke test for agent-gov: installer, gov.sh (scaffold + upgrade), plan.sh, score.sh, plan_check.py,
+claude-delete-session and the Windows scripts (statically; for real if pwsh exists).
 
-  python tests/smoke_test.py
+  python3 tests/smoke_test.py
+
+Everything runs on a throwaway COPY of the repo and a fake HOME, so your own ~/.agent-gov/.env and
+~/.claude are never touched. Python here is only the test runner; the tools under test are bash.
 """
 import json
 import os
@@ -14,377 +18,578 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TEMPLATES = ROOT / "templates"
-PLAN_CHECK_FILES = (".claude/commands/plan-check.md", ".cursor/commands/plan-check.md",
-                    ".github/prompts/plan-check.prompt.md", ".opencode/commands/plan-check.md")
-VALUES = {
-    "PROJECT_NAME": "demo", "IS_RESEARCH": "yes", "TASK_KEY": "DEMO",
-    "GIT_HOST": "GitHub", "DEFAULT_BRANCH": "main",
-    "EXTERNAL_TRACKER": "none", "GATE_CMD": "python -m pytest", "PY": "python3",
-}
+FAILURES = []
+TMP = Path(tempfile.mkdtemp(prefix="agent-gov-test-"))
+GIT_ENV = dict(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 
 
-def run(cwd, *cmd):
-    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-    return r.returncode, r.stdout + r.stderr
+def fail(msg):
+    FAILURES.append(msg)
 
 
-def scaffold(dest):
-    for src in TEMPLATES.rglob("*"):
-        if src.is_dir() or src.name in ("pointer.md", "gitignore.append"):
-            continue
-        out = dest / src.relative_to(TEMPLATES)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        text = src.read_text(encoding="utf-8")
-        for k, v in VALUES.items():
-            text = text.replace("{{%s}}" % k, v)
-        out.write_text(text, encoding="utf-8")
-    (dest / ".agents/init-version").write_text((ROOT / "VERSION").read_text())
+def run(cmd, cwd=None, env=None, check_rc=None):
+    e = dict(os.environ, **(env or {}))
+    r = subprocess.run(cmd, cwd=cwd, env=e, capture_output=True, text=True)
+    if check_rc is not None and r.returncode != check_rc:
+        fail(f"{' '.join(map(str, cmd))[:90]}: exit {r.returncode}, wanted {check_rc}: {(r.stdout + r.stderr)[-300:]}")
+    return r
 
 
-def main():
-    failures = []
-    tmp = Path(tempfile.mkdtemp())
-    try:
-        scaffold(tmp)
+def sh(script, *args, cwd=None, env=None, rc=None):
+    return run(["bash", str(script), *map(str, args)], cwd=cwd, env=env, check_rc=rc)
 
-        left = [str(p.relative_to(tmp)) for p in tmp.rglob("*")
-                if p.is_file() and "{{" in p.read_text(encoding="utf-8")]
-        if left:
-            failures.append(f"placeholders left in: {left}")
 
-        # what the agent fills in by hand
-        for c in PLAN_CHECK_FILES:
-            f = tmp / c
-            f.write_text(f.read_text().replace("<!-- PROJECT-CHECKS -->", "- gate passes"))
-        a = tmp / "AGENTS.md"
-        a.write_text(a.read_text().replace("<one line>", "x").replace('<stack, or "docs only">', "x"))
-        r = tmp / ".agents/roles.md"
-        r.write_text(r.read_text().replace("<name>", "me").replace("<role>", "maintainer"))
-        (tmp / ".gitignore").write_text((TEMPLATES / "gitignore.append").read_text())
-        scorer = str(ROOT / "scripts" / "score_init.py")
-        code, out = run(tmp, sys.executable, scorer, ".", "--agent", "t", "--write")
-        if code or not (tmp / ".agents/state/init-report.md").is_file():
-            failures.append(f"score_init on a good scaffold: {out}")
-        empty = Path(tempfile.mkdtemp())
-        code, out = run(empty, sys.executable, scorer, ".")
-        shutil.rmtree(empty, ignore_errors=True)
-        if code == 0:
-            failures.append("score_init passed on an empty dir")
+def mkdir(name):
+    d = TMP / f"{name}-{len(list(TMP.iterdir()))}"
+    d.mkdir(parents=True)
+    return d
 
-        code, out = run(tmp, sys.executable, ".agents/tools/check_adr.py")
-        if code or "OK" not in out:
-            failures.append(f"check_adr on empty ADR set: {out}")
 
-        code, out = run(tmp, sys.executable, ".agents/tools/plan.py", "list")
-        if code or "DEMO-1" not in out:
-            failures.append(f"plan list: {out}")
+def repo_copy():
+    """A working copy of this repo (with .git, so release tags are there) that tests may modify."""
+    dst = mkdir("repo") / "agent-gov"
+    shutil.copytree(ROOT, dst, ignore=shutil.ignore_patterns("__pycache__", ".env"))
+    return dst
 
-        for args, expect in [
-            (("set-status", "DEMO-1", "in-progress"), "in-progress"),
-            (("set-status", "DEMO-1", "done", "--mr", "http://x/1"), "pending"),
-            (("set-review", "DEMO-1", "approved", "--reviewer", "bob"), "approved"),
-        ]:
-            code, out = run(tmp, sys.executable, ".agents/tools/plan.py", *args)
-            _, lst = run(tmp, sys.executable, ".agents/tools/plan.py", "list")
-            if code or expect not in lst:
-                failures.append(f"plan {args}: {out}{lst}")
 
-        code, out = run(tmp, sys.executable, ".agents/tools/sync_plan.py", "push")
-        if code:
-            failures.append(f"sync_plan push (none): {out}")
+def tree(path):
+    out = []
+    for p in sorted(Path(path).rglob("*")):
+        if p.is_file():
+            out.append((str(p.relative_to(path)), p.stat().st_size, p.read_bytes()))
+    return out
 
-        # plan.csv deps, plan-check on a real git repo
-        code, out = run(tmp, sys.executable, ".agents/tools/plan.py", "set-deps", "DEMO-1", "--depends", "NOPE-9")
-        if code == 0:
-            failures.append("set-deps accepted an unknown id")
-        code, out = run(tmp, sys.executable, ".agents/tools/plan.py", "set-deps", "DEMO-1", "--depends", "DEMO-1", "--adr", "0003")
-        if code or "0003" not in (tmp / "plan.csv").read_text():
-            failures.append(f"set-deps: {out}")
-        pc = tmp / "plan.csv"
-        pc.write_text("id,title,owner,status,estimate,start,end,dod,mr,reviewer,review,updated,depends,adr,notes\n"
-                      "DEMO-1,t,me,in-progress,1d,2020-01-01,2020-01-02,d,,,,,,,\n")
-        for g in (("init", "-q", "-b", "main"), ("add", "-A"), ("commit", "-qm", "init")):
-            subprocess.run(["git", *g], cwd=tmp, capture_output=True,
-                           env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
-                                    GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
-        code, out = run(tmp, sys.executable, ".agents/plan-check/plan_check.py", "--no-fetch", "--date", "2026-01-01")
-        if code or "| ID |" not in out or "BEHIND" not in out:
-            failures.append(f"plan_check late task: {out}")
-        code, out = run(tmp, sys.executable, ".agents/plan-check/plan_check.py", "--no-fetch", "--lang", "vi")
-        if code or "| ID |" not in out:
-            failures.append(f"plan_check vi: {out}")
-        # a bare `python` command when the project's interpreter is python3 must be noticed
-        g = tmp / ".claude/commands/done.md"
-        gd = g.read_text()
-        g.write_text(gd + "\nRun `python .agents/tools/plan.py list`\n")
-        code, out = run(tmp, sys.executable, scorer, ".")
-        if code == 0 or "[ ] commands use the detected Python" not in out:
-            failures.append(f"scorer missed a bare python command: {out}")
-        g.write_text(gd)
-        # an unfilled marker must be noticed by the scorer
-        f = tmp / ".claude/commands/plan-check.md"
-        good = f.read_text()
-        f.write_text(good + "\n<!-- PROJECT-CHECKS -->\n")
-        code, out = run(tmp, sys.executable, scorer, ".")
-        if code == 0 or "Project checks filled" not in out or "[ ] plan-check Project checks" not in out:
-            failures.append(f"scorer missed the unfilled PROJECT-CHECKS marker: {out}")
-        f.write_text(good)
-        code, out = run(tmp, sys.executable, scorer, ".")
-        if code:
-            failures.append(f"scorer on a filled plan-check: {out}")
 
-        # (no update-check script any more: nothing to run here)
+def has(text, *needles):
+    return all(n in text for n in needles)
 
-        # ADR rules: two accepted ADRs on one topic must fail; a run-id check must catch stale numbers.
-        adr = tmp / ".agents/adr"
-        tpl = (adr / "0000-template.md").read_text()
-        for n, topic in (("0001", "t"), ("0002", "t")):
-            (adr / f"{n}-x.md").write_text(
-                tpl.replace("NNNN", n).replace("proposed", "accepted").replace("topic-slug", topic))
-        code, out = run(tmp, sys.executable, ".agents/tools/check_adr.py")
-        if code == 0 or "topic" not in out:
-            failures.append(f"duplicate topic not detected: {out}")
-        (adr / "0002-x.md").write_text(
-            (adr / "0002-x.md").read_text().replace("accepted", "superseded-by 0001", 1))
-        idx = adr / "README.md"
-        idx.write_text(idx.read_text().rstrip("\n") +
-                       "\n| 0001 | x | accepted |\n| 0002 | x | superseded-by 0001 |\n")
-        code, out = run(tmp, sys.executable, ".agents/tools/check_adr.py")
-        if code:
-            failures.append(f"valid supersede flagged: {out}")
 
-        (tmp / "rep.md").write_text("Table (run-id: r9)\n")
-        code, out = run(tmp, sys.executable, ".agents/tools/check_adr.py", "--reports", "rep.md")
-        if code == 0:
-            failures.append("stale run-id in report not detected")
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+# --------------------------------------------------------------------------- installer
+def test_installer():
+    gov = repo_copy()
+    inst = gov / "install.sh"
+    home = mkdir("home")
+    (home / ".claude").mkdir()
+    settings = home / ".claude/settings.json"
+    settings.write_text('{"model": "x", "permissions": {"allow": ["Bash(ls)"]}}')
+    proj = mkdir("proj")
+    jq = shutil.which("jq")
 
-    # release hygiene: VERSION equals the newest CHANGELOG heading
-    top = re.search(r"(?m)^## (\d+\.\d+\.\d+)", (ROOT / "CHANGELOG.md").read_text())
-    if not top or top.group(1) != (ROOT / "VERSION").read_text().strip():
-        failures.append("VERSION does not match the top CHANGELOG entry")
+    # user-wide: writes under HOME only, never in the project
+    before = tree(proj)
+    for _ in range(2):  # twice: idempotent
+        r = sh(inst, "--agent", "claude,cursor,gemini,opencode,codex,copilot", cwd=proj, env={"HOME": home}, rc=0)
+    expect = {
+        ".claude/commands/project-init.md": "claude", ".cursor/commands/project-init.md": "cursor",
+        ".gemini/commands/project-init.toml": "gemini", ".config/opencode/commands/project-init.md": "opencode",
+        ".codex/prompts/project-init.md": "codex",
+    }
+    for rel, name in expect.items():
+        f = home / rel
+        if not f.is_file() or "agent-governance scaffold" not in f.read_text():
+            fail(f"user-wide install: {name} command missing at ~/{rel}")
+    if tree(proj) != before:
+        fail("a user-wide install changed the project folder")
+    if "no user-wide commands" not in r.stdout:
+        fail("copilot user-wide must explain it is project only")
+    claude_cmd = (home / ".claude/commands/project-init.md").read_text()
+    if not has(claude_cmd, "init.md", "do not change anything outside it") or "git fetch" in claude_cmd:
+        fail("the generated command must point at init.md, stay inside the project and not check for updates")
+    if "agent: agent" in (home / ".config/opencode/commands/project-init.md").read_text():
+        fail("only Copilot prompt files use the agent: field")
+    if not (home / ".local/bin/claude-delete-session").is_file():
+        fail("user-wide claude must install claude-delete-session")
+    cfg = json.loads(settings.read_text())
+    rule = "Bash(~/.local/bin/claude-delete-session)"
+    if jq:
+        if cfg.get("model") != "x" or cfg["permissions"]["allow"] != ["Bash(ls)", rule]:
+            fail(f"settings.json not preserved or rule duplicated: {cfg}")
+    elif cfg["permissions"]["allow"] != ["Bash(ls)"] or "jq not found" not in r.stdout:
+        fail("without jq the installer must leave settings.json alone and print the rule")
+    envf = (gov / ".env").read_text()
+    if not has(envf, "AGENT_GOV_OS=", "AGENT_GOV_SHELL=", "AGENT_GOV_PY=", "AGENT_GOV_INSTALLER=install.sh"):
+        fail(f".env incomplete: {envf}")
 
-    # install.sh --update against a throwaway clone
-    base = Path(tempfile.mkdtemp())
-    def git(*a, cwd):
-        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True,
-                              env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
-                                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
-    up = base / "up"; shutil.copytree(ROOT, up, ignore=shutil.ignore_patterns(".git", "__pycache__"))
-    git("init", "-q", "-b", "main", cwd=up); git("add", "-A", cwd=up); git("commit", "-qm", "v", cwd=up)
-    clone = base / "clone"; git("clone", "-q", str(up), str(clone), cwd=base)
-    r = subprocess.run(["bash", str(clone / "install.sh"), "--update"], capture_output=True, text=True)
-    if "up to date" not in r.stdout:
-        failures.append(f"install --update when current: {r.stdout}{r.stderr}")
-    (up / "VERSION").write_text("9.0.0\n")
-    (up / "CHANGELOG.md").write_text("# c\n\n## 9.0.0 — d\n- new thing\n" + (up / "CHANGELOG.md").read_text().split("\n", 1)[1])
-    git("commit", "-qam", "next", cwd=up)
-    r = subprocess.run(["bash", str(clone / "install.sh"), "--update"], capture_output=True, text=True)
-    if "9.0.0" not in r.stdout or "new thing" not in r.stdout:
-        failures.append(f"install --update when behind: {r.stdout}{r.stderr}")
-    shutil.rmtree(base, ignore_errors=True)
+    # a copy from 0.7.0 in the wrong folder is removed, but only by a user-wide install
+    wrong = home / ".opencode/commands/project-init.md"
+    wrong.parent.mkdir(parents=True)
+    wrong.write_text(claude_cmd)
+    sh(inst, "--agent", "cursor", cwd=proj, env={"HOME": home}, rc=0)
+    if wrong.exists():
+        fail("the misplaced 0.7.0 file was not removed by a user-wide install")
 
-    # delete-session: compiles; installed by a user-wide claude install only; keeps settings; idempotent
+    # project install: writes only under the project, touches nothing in HOME
+    home2 = mkdir("home")
+    (home2 / ".claude").mkdir()
+    (home2 / ".claude/commands").mkdir()
+    (home2 / ".claude/commands/foreign.md").write_text("mine")
+    snap = tree(home2)
+    proj2 = mkdir("proj")
+    r = sh(inst, "--agent", "claude,cursor,copilot,gemini,opencode,codex", "--project", cwd=proj2, env={"HOME": home2}, rc=0)
+    if tree(home2) != snap:
+        fail("a --project install changed the home folder")
+    for rel in (".claude/commands/project-init.md", ".cursor/commands/project-init.md", ".github/prompts/project-init.prompt.md",
+                ".gemini/commands/project-init.toml", ".opencode/commands/project-init.md"):
+        if not (proj2 / rel).is_file():
+            fail(f"--project install missing {rel}")
+    if "agent: agent" not in (proj2 / ".github/prompts/project-init.prompt.md").read_text():
+        fail("Copilot prompt file needs the agent: field")
+    if "codex" not in r.stdout or (proj2 / ".codex").exists():
+        fail("codex has no project scope: it must say so and write nothing")
+    sh(inst, "--agent", "claude", "--project", cwd=gov, env={"HOME": home2}, rc=2)  # inside the agent-gov folder
+
+    # both scopes: warn, never delete across scopes; --uninstall removes only ours, in the scope asked
+    r = sh(inst, "--agent", "claude", cwd=proj2, env={"HOME": home2}, rc=0)
+    if "WARNING" not in r.stdout or "twice" not in r.stdout:
+        fail("installing user-wide next to a project copy must warn about the duplicate")
+    if not (proj2 / ".claude/commands/project-init.md").is_file():
+        fail("the user-wide install deleted the project copy")
+    sh(inst, "--agent", "claude", "--uninstall", cwd=proj2, env={"HOME": home2}, rc=0)
+    if (home2 / ".claude/commands/project-init.md").exists() or not (home2 / ".claude/commands/foreign.md").exists():
+        fail("--uninstall must remove only our file in that scope")
+    if not (proj2 / ".claude/commands/project-init.md").is_file():
+        fail("--uninstall (user-wide) removed the project copy")
+    sh(inst, "--agent", "claude", "--uninstall", "--project", cwd=proj2, env={"HOME": home2}, rc=0)
+    if (proj2 / ".claude/commands/project-init.md").exists():
+        fail("--uninstall --project did not remove the project copy")
+
+    # removed options and bad input
+    for bad in (["--update"], ["--with", "x"], ["--agent", "nope"]):
+        sh(inst, *bad, cwd=proj2, env={"HOME": home2}, rc=2)
+
+    # Python detection recorded in .env
+    for cands, want in (("python3", "AGENT_GOV_PY=python3"), ("nope1 nope2", "AGENT_GOV_PY=none")):
+        h = mkdir("home")
+        sh(inst, "--agent", "cursor", cwd=proj2, env={"HOME": h, "AGENT_GOV_PY_CANDIDATES": cands}, rc=0)
+        if want not in (gov / ".env").read_text():
+            fail(f"python detection with {cands!r}: wanted {want} in .env")
+
+
+# --------------------------------------------------------------------------- gov.sh
+VARS = "PROJECT_NAME=demo\nWHAT=A demo project\nGOAL=Ship it\nSTACK=python\nTASK_KEY=DEMO\nGATE_CMD=pytest\nIS_RESEARCH=no\n"
+
+
+def make_vars(path, extra=""):
+    path.write_text(VARS + extra)
+    return path
+
+
+def test_detect_and_scaffold():
+    gov = ROOT
+    p = mkdir("proj")
+    run(["git", "init", "-q", "-b", "main"], cwd=p)
+    run(["git", "remote", "add", "origin", "https://github.com/acme/demo.git"], cwd=p)
+    (p / "package.json").write_text('{"scripts": {"test": "jest"}}')
+    (p / ".claude").mkdir()
+    (p / "record.md").write_text("legacy")
+    d = sh(gov / "scripts/gov.sh", "detect", p, rc=0).stdout
+    if not has(d, "manifest=no", "git=yes", "git_host=GitHub", "default_branch=main", "agent_dirs=claude",
+               "gate_guess=npm test", "legacy=record.md", "agents_md=no"):
+        fail(f"detect output wrong:\n{d}")
+
+    # scaffold: selection by agents / plan-check, pointers, .gitignore, manifest, no placeholder left
+    p = mkdir("proj")
+    (p / "AGENTS.md").write_text("MY OWN RULES\n")
+    v = make_vars(p / "vars.env", "AGENTS=claude,opencode,copilot,gemini\nPLAN_CHECK=yes\n")
+    r = sh(gov / "scripts/gov.sh", "scaffold", p, "--vars", v, rc=0).stdout
+    if (p / "AGENTS.md").read_text() != "MY OWN RULES\n" or "EXISTS\tAGENTS.md" not in r:
+        fail("scaffold must keep an existing AGENTS.md untouched and say EXISTS")
+    must = [".agents/roles.md", ".agents/wiki/decisions-log.md", ".agents/tools/plan.sh", ".agents/tools/plan.ps1",
+            ".agents/tools/plan.cmd", "plan.csv", "CLAUDE.md", ".claude/commands/done.md", ".claude/commands/plan-check.md",
+            ".opencode/commands/done.md", ".github/prompts/done.prompt.md", ".github/copilot-instructions.md", "GEMINI.md",
+            ".agents/plan-check/plan_check.py", ".agents/init-manifest"]
+    for rel in must:
+        if not (p / rel).is_file():
+            fail(f"scaffold did not create {rel}")
+    for rel in (".cursor", ".agents/adr", ".agents/tools/check_adr.py", ".agents/tools/sync_plan.py", ".agents/tools/plan.py"):
+        if (p / rel).exists():
+            fail(f"scaffold must not create {rel}")
+    left = [str(f.relative_to(p)) for f in p.rglob("*") if f.is_file() and ".git" not in f.parts
+            and re.search(r"\{\{[A-Z_]+\}\}", f.read_text(errors="ignore")) and f.name != "AGENTS.md"]
+    if left:
+        fail(f"placeholders left after scaffold: {left}")
+    man = (p / ".agents/init-manifest").read_text()
+    if not has(man, "version " + (ROOT / "VERSION").read_text().strip(), "var PROJECT_NAME=demo", "file\t"):
+        fail("manifest incomplete")
+    gi = (p / ".gitignore").read_text()
+    if not has(gi, ".agents/state/", ".agents/*.bak"):
+        fail(".gitignore lines missing")
+    sh(gov / "scripts/gov.sh", "scaffold", p, "--vars", v, rc=2)  # a second scaffold must refuse
+
+    # not selected -> not created (claude only, no plan-check)
+    p2 = mkdir("proj")
+    sh(gov / "scripts/gov.sh", "scaffold", p2, "--vars", make_vars(p2 / "vars.env"), rc=0)
+    for rel in (".agents/plan-check", ".claude/commands/plan-check.md", ".opencode", ".github", "GEMINI.md"):
+        if (p2 / rel).exists():
+            fail(f"{rel} must not be created for claude without plan-check")
+    # CRLF files compare equal (Windows checkouts)
+    f = p2 / ".agents/wiki/learnings.md"
+    f.write_bytes(f.read_bytes().replace(b"\n", b"\r\n"))
+    out = sh(gov / "scripts/gov.sh", "upgrade", p2, rc=0).stdout
+    if "learnings.md" in out:
+        fail(f"a CRLF copy must count as unmodified: {out}")
+
+
+def test_upgrade():
+    # a working copy of the repo plays "the new release"; the project was scaffolded from the current one
+    gov = repo_copy()
+    g = gov / "scripts/gov.sh"
+    p = mkdir("proj")
+    sh(g, "scaffold", p, "--vars", make_vars(p / "vars.env", "PLAN_CHECK=no\n"), rc=0)
+    (p / "record.md").write_text("legacy notes")
+    (p / "AGENTS.md").write_text((p / "AGENTS.md").read_text() + "- my own rule\n")
+    (p / ".agents/wiki/working-process.md").write_text("my process\n")
+    # release N+1
+    t = gov / "templates"
+    (t / ".agents/wiki/learnings.md").write_text((t / ".agents/wiki/learnings.md").read_text() + "- new in template\n")
+    (t / "AGENTS.md").write_text((t / "AGENTS.md").read_text() + "- new rule in template\n")
+    (t / ".agents/wiki/open-questions.md").unlink()
+    (t / ".agents/wiki/working-process.md").unlink()
+    (t / ".agents/wiki/extra.md").write_text("# new\n")
+    plan = sh(g, "upgrade", p, rc=0).stdout
+    for line in ("ADD\t.agents/wiki/extra.md", "UPDATE\t.agents/wiki/learnings.md", "CONFLICT\tAGENTS.md",
+                 "REMOVE\t.agents/wiki/open-questions.md", "ORPHAN\t.agents/wiki/working-process.md"):
+        if line not in plan:
+            fail(f"upgrade plan lacks {line!r}:\n{plan}")
+    if "dry run" not in plan or (p / ".agents/wiki/extra.md").exists() or (p / ".agents/wiki/open-questions.md").exists() is False:
+        fail("the default upgrade must be a dry run that changes nothing")
+    sh(g, "upgrade", p, "--apply", rc=0)
+    if not (p / ".agents/wiki/extra.md").is_file() or (p / ".agents/wiki/open-questions.md").exists():
+        fail("--apply must add the new file and remove the untouched dropped one")
+    if "new in template" not in (p / ".agents/wiki/learnings.md").read_text():
+        fail("an untouched file must be updated")
+    if "my own rule" not in (p / "AGENTS.md").read_text() or "new rule in template" in (p / "AGENTS.md").read_text():
+        fail("a modified AGENTS.md must be left exactly as the user has it")
+    if "new rule in template" not in (p / "AGENTS.md.agent-gov-new").read_text():
+        fail("the new AGENTS.md must be written to AGENTS.md.agent-gov-new")
+    if (p / ".agents/wiki/working-process.md").read_text() != "my process\n" or (p / "record.md").read_text() != "legacy notes":
+        fail("a modified orphan and files agent-gov does not own must be kept")
+    again = sh(g, "upgrade", p, rc=0).stdout
+    if "CONFLICT\tAGENTS.md" not in again or "UPDATE" in again or "ADD" in again:
+        fail(f"a second upgrade must only repeat the open conflict:\n{again}")
+    sh(g, "record", p, "AGENTS.md", rc=0)
+    done = sh(g, "upgrade", p, rc=0).stdout
+    if "CONFLICT" in done or (p / "AGENTS.md.agent-gov-new").exists():
+        fail(f"record must close the conflict and remove the .new file:\n{done}")
+    sh(g, "record", p, "record.md", rc=2)
+
+    # a project with no manifest (older agent-gov): limited mode, uses the released tags
+    tags = run(["git", "-C", str(ROOT), "tag", "-l", "v0.8.1"]).stdout.strip()
+    if not tags:
+        print("note: tag v0.8.1 not found (shallow clone?): skipped the limited-mode upgrade test")
+        return
+    gov2 = repo_copy()
+    old = mkdir("old")
+    for rel in (".agents/tools/check_adr.py", ".agents/tools/plan.py", ".agents/tools/sync_plan.py",
+                ".agents/adr/README.md", ".agents/adr/0000-template.md"):
+        (old / rel).parent.mkdir(parents=True, exist_ok=True)
+        (old / rel).write_bytes(run(["git", "-C", str(gov2), "show", f"v0.8.1:templates/{rel}"]).stdout.encode())
+    (old / ".agents/tools/sync_plan.py").write_text((old / ".agents/tools/sync_plan.py").read_text() + "# touched\n")
+    (old / ".agents/adr/0001-mine.md").write_text("# my adr\n")
+    (old / "AGENTS.md").write_text("custom\n")
+    (old / "record.md").write_text("legacy")
+    out = sh(gov2 / "scripts/gov.sh", "upgrade", old, rc=0).stdout
+    for line in ("WARNING: no manifest", "REMOVE\t.agents/tools/check_adr.py", "REMOVE\t.agents/tools/plan.py",
+                 "REMOVE\t.agents/adr/README.md", "ORPHAN\t.agents/tools/sync_plan.py", "UNKNOWN\tAGENTS.md",
+                 "ADD\t.agents/tools/plan.sh"):
+        if line not in out:
+            fail(f"limited-mode plan lacks {line!r}:\n{out}")
+    if "0001-mine" in out or "record.md" in out:
+        fail("the user's own ADR and record.md must not appear in the plan")
+    sh(gov2 / "scripts/gov.sh", "upgrade", old, "--apply", rc=0)
+    if (old / ".agents/tools/check_adr.py").exists() or not (old / ".agents/adr/0001-mine.md").exists() \
+            or not (old / ".agents/tools/sync_plan.py").exists() or (old / "AGENTS.md").read_text() != "custom\n":
+        fail("limited-mode --apply removed or changed something it must keep")
+    if (old / ".agents/init-manifest").exists():
+        fail("limited mode without --vars must not create a manifest")
+    # with values it can compare everything and creates the manifest
+    out = sh(gov2 / "scripts/gov.sh", "upgrade", old, "--vars", make_vars(old / "vars.env"), "--apply", rc=0).stdout
+    if "NEEDS-VARS" in out or not (old / ".agents/init-manifest").is_file() or not (old / "plan.csv").is_file():
+        fail(f"limited mode with --vars must create the missing files and the manifest:\n{out}")
+
+
+# --------------------------------------------------------------------------- plan.sh, score.sh
+def scaffolded(plan_check=True, agents="claude"):
+    p = mkdir("proj")
+    sh(ROOT / "scripts/gov.sh", "scaffold", p, "--vars",
+       make_vars(p / "vars.env", f"AGENTS={agents}\nPLAN_CHECK={'yes' if plan_check else 'no'}\n"), rc=0)
+    return p
+
+
+def test_plan_and_score():
+    p = scaffolded()
+    (p / "plan.csv").write_text(
+        "id,title,owner,status,estimate,start,end,dod,mr,reviewer,review,updated,depends,notes\n"
+        'D-1,"Quoted, with comma",ann,in-progress,2d,2000-01-01,2000-01-02,"dod ""q""",,,,,,\n'
+        "D-2,Done one,bob,done,1d,2000-01-01,2000-01-01,,,,,,,\n"
+        "D-3,Future,ann,todo,1d,2999-01-01,2999-01-02,,,,,,D-1,\n")
+    out = sh(p / ".agents/tools/plan.sh", "list", rc=0).stdout
+    if not has(out, "D-1", "Quoted, with comma LATE", "1/3 done (33%)") or "D-3" not in out or "D-2 " not in out:
+        fail(f"plan.sh list output wrong:\n{out}")
+    mine = sh(p / ".agents/tools/plan.sh", "list", "--owner", "ann", rc=0).stdout
+    if "D-2" in mine or "D-1" not in mine or "1/3 done" not in mine:
+        fail(f"plan.sh --owner must filter rows but count the whole plan:\n{mine}")
+    if "D-1" in sh(p / ".agents/tools/plan.sh", "list", "--status", "done", rc=0).stdout:
+        fail("plan.sh --status filter")
+    sh(p / ".agents/tools/plan.sh", "set-status", "D-1", "done", rc=2)  # the edit commands are gone on purpose
+
+    # a fresh scaffold: only the things the agent still has to do may fail
+    q = scaffolded()
+    r = sh(ROOT / "scripts/score.sh", q, "--agent", "t", "--write")
+    failing = [l for l in r.stdout.splitlines() if l.startswith("- [ ]")]
+    if len(failing) != 1 or "Standup checks" not in failing[0]:
+        fail(f"a fresh scaffold should fail only 'Standup checks filled':\n{r.stdout}")
+    if not (q / ".agents/state/init-report.md").is_file():
+        fail("score.sh --write must write the report")
+    wp = q / ".agents/wiki/working-process.md"
+    wp.write_text(wp.read_text() + "- the gate passes on the default branch\n")
+    r = sh(ROOT / "scripts/score.sh", q, rc=0)
+    if "score 15/15" not in r.stdout and "score " not in r.stdout:
+        fail(f"score after filling the standup checks:\n{r.stdout}")
+    if re.search(r"^- \[ \]", r.stdout, re.M):
+        fail(f"all checks should pass after filling the standup checks:\n{r.stdout}")
+    e = sh(ROOT / "scripts/score.sh", mkdir("empty"))
+    if e.returncode == 0 or "Traceback" in e.stderr or "No such file" in e.stderr:
+        fail(f"score.sh on an empty folder must fail cleanly: {e.stderr[-200:]}")
+    (q / "CLAUDE.md").write_text("junk\n")
+    (q / "AGENTS.md").write_text((q / "AGENTS.md").read_text() + "{{LEFT}}\n")
+    r = sh(ROOT / "scripts/score.sh", q)
+    if r.returncode == 0 or "CLAUDE.md is one line" not in r.stdout or "[ ] no {{placeholder}} left" not in r.stdout:
+        fail("score.sh missed a bad CLAUDE.md or a leftover placeholder")
+
+
+# --------------------------------------------------------------------------- plan_check.py
+def test_plan_check():
+    py = shutil.which("python3") or sys.executable
+    pc = ROOT / "templates/.agents/plan-check/plan_check.py"
+    d = mkdir("pc")
+    run(["git", "init", "-q", "-b", "main"], cwd=d)
+    run(["git", "commit", "-q", "--allow-empty", "-m", "init"], cwd=d, env=GIT_ENV)
+    head = "id,title,owner,status,estimate,start,end,dod,mr,reviewer,review,updated,depends,notes\n"
+
+    def report(rows):
+        (d / "plan.csv").write_text(head + "".join(f"{r},,,,,,,,\n" if r.count(",") < 9 else r + "\n" for r in rows))
+        r = run([py, str(pc), "--no-fetch", "--date", "2026-01-10"], cwd=d)
+        ids = re.findall(r"^\| ([A-Z]-\d) \|", r.stdout, re.M)
+        return r, ids
+
+    behind = ["P-1,future,ann,todo,1d,2026-02-01,2026-02-02,,,,,,,", "P-2,plain,ann,todo,1d,,,,,,,,,",
+              "P-3,window today,ann,in-progress,3d,2026-01-09,2026-01-12,,,,,,,",
+              "P-4,blocks P-5,bob,in-progress,3d,2026-01-08,2026-01-15,,,,,,,",
+              "P-5,waits,bob,todo,1d,2026-01-16,2026-01-17,,,,,,P-4,",
+              "P-6,late plain,cara,in-progress,1d,2026-01-01,2026-01-03,,,,,,,",
+              "P-7,late and blocks,ann,in-progress,1d,2026-01-01,2026-01-04,,,,,,,",
+              "P-8,waits,bob,todo,1d,2026-01-16,2026-01-17,,,,,,P-7,"]
+    r, ids = report(behind)
+    if "BEHIND SCHEDULE" not in r.stdout or ids[:5] != ["P-7", "P-6", "P-4", "P-3", "P-2"]:
+        fail(f"behind schedule order must be late+blocking, late, blocking, today, rest; got {ids}\n{r.stdout[-400:]}")
+    on_track = [x for x in behind if not x.startswith(("P-6", "P-7"))]
+    on_track = [x.replace(",P-7,", ",,") for x in on_track]
+    r, ids = report(on_track)
+    if "ON TRACK" not in r.stdout or ids[:2] != ["P-3", "P-4"] or ids[-1] != "P-1":
+        fail(f"on track order must put today's tasks first; got {ids}\n{r.stdout[-300:]}")
+    if "adr" in r.stdout.lower():
+        fail("plan-check must not mention ADRs any more")
+    r = run([py, str(pc), "--no-fetch", "--lang", "vi", "--date", "2026-01-10"], cwd=d)
+    if r.returncode != 0 or "| ID |" not in r.stdout:
+        fail(f"plan_check --lang vi: {r.stdout}{r.stderr}")
+
+
+# --------------------------------------------------------------------------- claude-delete-session
+def test_delete_session():
     src = ROOT / "bin/claude-delete-session"
     compile(src.read_text(encoding="utf-8"), str(src), "exec")
-    import json
-
-    def install(home, *args, cwd=None):
-        return subprocess.run(["bash", str(ROOT / "install.sh"), *args], capture_output=True, text=True,
-                              cwd=cwd, env=dict(os.environ, HOME=str(home)))
-
-    home = Path(tempfile.mkdtemp())
-    (home / ".claude").mkdir()
-    (home / ".claude/settings.json").write_text('{"model": "x", "permissions": {"allow": ["Bash(ls)"]}}')
-    for _ in range(2):
-        r = install(home, "--agent", "claude")
-    cfg = json.loads((home / ".claude/settings.json").read_text())
-    rule = "Bash(~/.local/bin/claude-delete-session)"
-    if r.returncode or not (home / ".local/bin/claude-delete-session").is_file():
-        failures.append(f"install --agent claude did not install delete-session: {r.stdout}{r.stderr}")
-    if cfg.get("model") != "x" or cfg["permissions"]["allow"] != ["Bash(ls)", rule]:
-        failures.append(f"settings.json not preserved or rule duplicated: {cfg}")
-    for args, why in ((("--agent", "cursor"), "cursor"), (("--agent", "claude", "--project"), "claude --project")):
-        other = Path(tempfile.mkdtemp())
-        r = install(other, *args, cwd=other)
-        if r.returncode or (other / ".local").exists():
-            failures.append(f"install {why} must not install delete-session: {r.stdout}{r.stderr}")
-        shutil.rmtree(other, ignore_errors=True)
-    r = install(home, "--with", "delete-session")
-    if r.returncode != 2:
-        failures.append("the removed --with option was accepted")
-    shutil.rmtree(home, ignore_errors=True)
-
-    # claude-delete-session in a pseudo terminal: scoping, search, deletion, and no curses crash
     try:
         import fcntl, pty, select, struct, termios
     except ImportError:
-        pty = None
-    if pty:
-        def encode(p):
-            return re.sub(r"[^A-Za-z0-9]", "-", str(p))
+        print("note: no pty module here: skipped the claude-delete-session terminal test")
+        return
+    home = mkdir("home")
+    proj = home / "work" / "app"
+    proj.mkdir(parents=True)
+    enc = lambda p: re.sub(r"[^A-Za-z0-9]", "-", str(p))
 
-        home = Path(tempfile.mkdtemp())
-        proj = home / "work" / "app"
-        proj.mkdir(parents=True)
+    def make(pdir, sid, title, age):
+        d = home / ".claude/projects" / enc(pdir)
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / f"{sid}.jsonl"
+        f.write_text(json.dumps({"type": "user", "cwd": str(pdir), "gitBranch": "main", "message": {"content": "hi"}})
+                     + "\n" + json.dumps({"type": "ai-title", "aiTitle": title}) + "\n")
+        os.utime(f, (time.time() - age, time.time() - age))
+        return f
 
-        def make(pdir, sid, title, age):
-            d = home / ".claude/projects" / encode(pdir)
-            d.mkdir(parents=True, exist_ok=True)
-            f = d / f"{sid}.jsonl"
-            f.write_text(json.dumps({"type": "user", "cwd": str(pdir), "gitBranch": "main", "message": {"content": "hi"}})
-                         + "\n" + json.dumps({"type": "ai-title", "aiTitle": title}) + "\n")
-            os.utime(f, (time.time() - age, time.time() - age))
-            return f
+    a_ = make(proj, "aaaa", "Tối ưu triển khai", 7200)
+    side = a_.with_suffix("")
+    (side / "subagents").mkdir(parents=True)
+    (side / "data.txt").write_text("x")
+    (side / "subagents" / "agent.jsonl").write_text(json.dumps({"type": "ai-title", "aiTitle": "SUBONLY"}) + "\n")
+    b_ = make(proj, "bbbb", "Second session", 9000)
+    c_ = make(home / "other", "cccc", "Other project OTHERONLY", 9000)
 
-        a_ = make(proj, "aaaa", "T\u1ed1i \u01b0u tri\u1ec3n khai", 7200)
-        side = a_.with_suffix("")
-        (side / "subagents").mkdir(parents=True)
-        (side / "data.txt").write_text("x")
-        (side / "subagents" / "agent.jsonl").write_text(json.dumps({"type": "ai-title", "aiTitle": "SUBONLY"}) + "\n")
-        b_ = make(proj, "bbbb", "Second session", 9000)
-        c_ = make(home / "other", "cccc", "Other project OTHERONLY", 9000)
+    def tui(keys, rows=24, cols=80):
+        m, sl = pty.openpty()
+        fcntl.ioctl(sl, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        env = dict(os.environ, HOME=str(home), TERM="xterm")
+        env.pop("CLAUDE_CONFIG_DIR", None)
+        pr = subprocess.Popen([sys.executable, str(src)], stdin=sl, stdout=sl, stderr=sl, cwd=proj, env=env, close_fds=True)
+        os.close(sl)
+        out = b""
 
-        def tui(keys, rows=24, cols=80):
-            m, sl = pty.openpty()
-            fcntl.ioctl(sl, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-            env = dict(os.environ, HOME=str(home), TERM="xterm")
-            env.pop("CLAUDE_CONFIG_DIR", None)
-            pr = subprocess.Popen([sys.executable, str(ROOT / "bin/claude-delete-session")], stdin=sl, stdout=sl,
-                                  stderr=sl, cwd=proj, env=env, close_fds=True)
-            os.close(sl)
-            out = b""
+        def drain(sec):
+            nonlocal out
+            end = time.time() + sec
+            while time.time() < end:
+                if select.select([m], [], [], 0.05)[0]:
+                    try:
+                        d = os.read(m, 65536)
+                    except OSError:
+                        return
+                    if not d:
+                        return
+                    out += d
 
-            def drain(sec):
-                nonlocal out
-                end = time.time() + sec
-                while time.time() < end:
-                    if select.select([m], [], [], 0.05)[0]:
-                        try:
-                            d = os.read(m, 65536)
-                        except OSError:
-                            return
-                        if not d:
-                            return
-                        out += d
+        drain(0.8)
+        for k in keys:
+            os.write(m, k.encode())
+            drain(0.4)
+        drain(0.6)
+        try:
+            rc = pr.wait(3)
+        except subprocess.TimeoutExpired:
+            pr.kill()
+            rc = "timeout"
+        os.close(m)
+        return rc, out.decode("utf-8", "replace")
 
-            drain(0.8)
-            for k in keys:
-                os.write(m, k.encode())
-                drain(0.4)
-            drain(0.6)
-            try:
-                rc = pr.wait(3)
-            except subprocess.TimeoutExpired:
-                pr.kill()
-                rc = "timeout"
-            os.close(m)
-            return rc, out.decode("utf-8", "replace")
+    for name, keys, kw in (("ctrl+A then esc", ["\x01", "\x1b"], {}), ("very wide terminal", ["\x01", "\x1b"], {"cols": 1000}),
+                           ("terminal too small", ["\x1b"], {"rows": 5, "cols": 20}),
+                           ("other project hidden by default", ["OTHERONLY", "\n"], {}),
+                           ("subagent transcript not listed", ["SUBONLY", "\n"], {})):
+        rc, out = tui(keys, **kw)
+        if rc != 0 or "Traceback" in out or "Cancelled." not in out:
+            fail(f"claude-delete-session [{name}]: rc={rc} {out[-300:]!r}")
+    if not c_.exists():
+        fail("claude-delete-session deleted a session of another project")
+    rc, out = tui(["\x01", "OTHERONLY", "\n", "n\n"])
+    if rc != 0 or "Aborted." not in out or not c_.exists():
+        fail(f"claude-delete-session: answering n must keep the session: {out[-200:]!r}")
+    rc, out = tui(["tối", "\n", "y\n"])
+    if rc != 0 or "Deleted" not in out or a_.exists() or side.exists() or not b_.exists():
+        fail(f"claude-delete-session: Vietnamese search + delete: rc={rc} {out[-300:]!r}")
 
-        for name, keys, kw, check in (
-            ("ctrl+A then esc", ["\x01", "\x1b"], {}, lambda o: "Cancelled." in o),
-            ("very wide terminal", ["\x01", "\x1b"], {"cols": 1000}, lambda o: "Cancelled." in o),
-            ("terminal too small", ["\x1b"], {"rows": 5, "cols": 20}, lambda o: "Cancelled." in o),
-            ("other project hidden by default", ["OTHERONLY", "\n"], {}, lambda o: "Cancelled." in o),
-            ("subagent transcript not listed", ["SUBONLY", "\n"], {}, lambda o: "Cancelled." in o),
-        ):
-            rc, out = tui(keys, **kw)
-            if rc != 0 or "Traceback" in out or not check(out):
-                failures.append(f"claude-delete-session [{name}]: rc={rc} {out[-300:]!r}")
-        if not c_.exists():
-            failures.append("claude-delete-session deleted a session of another project")
-        rc, out = tui(["\x01", "OTHERONLY", "\n", "n\n"])
-        if rc != 0 or "Aborted." not in out or not c_.exists():
-            failures.append(f"claude-delete-session: answering n must keep the session: {out[-200:]!r}")
-        rc, out = tui(["t\u1ed1i", "\n", "y\n"])
-        if rc != 0 or "Deleted" not in out or a_.exists() or side.exists() or not b_.exists():
-            failures.append(f"claude-delete-session: Vietnamese search + delete: rc={rc} {out[-300:]!r}")
-        shutil.rmtree(home, ignore_errors=True)
 
-    # python detection: installer bakes the interpreter into the command, or warns when there is none
-    for cands, want_in_cmd, want_warn in (("python3", "Python on this machine: `python3`", False),
-                                          ("nope1 nope2", "Python 3.8+ was NOT found", True)):
-        h = Path(tempfile.mkdtemp())
-        r = subprocess.run(["bash", str(ROOT / "install.sh"), "--agent", "cursor"], capture_output=True, text=True,
-                           env=dict(os.environ, HOME=str(h), AGENT_GOV_PY_CANDIDATES=cands))
-        cmd = (h / ".cursor/commands/project-init.md").read_text()
-        if r.returncode or want_in_cmd not in cmd or (("WARNING" in r.stderr) != want_warn):
-            failures.append(f"python detection with candidates {cands!r}: {r.stdout}{r.stderr}")
-        shutil.rmtree(h, ignore_errors=True)
-    for c in PLAN_CHECK_FILES:
-        if "Python 3.8+ not found" not in (TEMPLATES / c).read_text():
-            failures.append(f"{c} lacks the missing-Python reply")
-    for f in TEMPLATES.rglob("*"):
-        if f.is_file() and f.suffix == ".md" and re.search(r"(?<![\w-])python (?:\.agents/|scripts/)", f.read_text()):
-            failures.append(f"bare `python` command left in template {f.relative_to(TEMPLATES)}")
-
-    # OpenCode: global dir is ~/.config/opencode/commands, project dir is .opencode/commands
-    for args, rel, cwd_home in ((("--agent", "opencode"), ".config/opencode/commands/project-init.md", False),
-                                (("--agent", "opencode", "--project"), ".opencode/commands/project-init.md", True)):
-        h = Path(tempfile.mkdtemp())
-        r = subprocess.run(["bash", str(ROOT / "install.sh"), *args], capture_output=True, text=True,
-                           cwd=h, env=dict(os.environ, HOME=str(h)))
-        if r.returncode or not (h / rel).is_file():
-            failures.append(f"install {' '.join(args)} did not write {rel}: {r.stdout}{r.stderr}")
-        shutil.rmtree(h, ignore_errors=True)
-
-    # Windows installer: cannot run PowerShell everywhere, so check what can break it statically
-    ps1 = (ROOT / "install.ps1").read_text(encoding="utf-8")
-    sh = (ROOT / "install.sh").read_text(encoding="utf-8")
-    if not ps1.isascii():
-        failures.append("install.ps1 must be ASCII only (Windows PowerShell 5.1 misreads BOM-less UTF-8)")
-    for bad in ("&&", "||", "??", "?."):
-        if bad in ps1:
-            failures.append(f"install.ps1 uses {bad!r}, which Windows PowerShell 5.1 does not parse")
+# --------------------------------------------------------------------------- Windows scripts
+def test_windows():
+    ps1s = [ROOT / "install.ps1", ROOT / "scripts/gov.ps1", ROOT / "scripts/score.ps1",
+            ROOT / "templates/.agents/tools/plan.ps1"]
+    for f in ps1s:
+        t = f.read_text(encoding="utf-8")
+        if not t.isascii():
+            fail(f"{f.relative_to(ROOT)} must be ASCII only (Windows PowerShell 5.1 misreads BOM-less UTF-8)")
+        for bad in ("&&", "||", "??", "?."):
+            if bad in t:
+                fail(f"{f.relative_to(ROOT)} uses {bad!r}, which Windows PowerShell 5.1 does not parse")
     for f in ROOT.rglob("*.ps1"):
         raw = f.read_bytes()
-        if not raw.isascii() and not raw.startswith(b"\xef\xbb\xbf"):
-            failures.append(f"{f.relative_to(ROOT)} has non-ASCII text but no UTF-8 BOM (PowerShell 5.1 would misread it)")
-    cmd = (ROOT / "install.cmd").read_text()
-    if "-ExecutionPolicy Bypass" not in cmd or "install.ps1" not in cmd:
-        failures.append("install.cmd must call install.ps1 with -ExecutionPolicy Bypass")
+        if ".git" not in f.parts and not raw.isascii() and not raw.startswith(b"\xef\xbb\xbf"):
+            fail(f"{f.relative_to(ROOT)} has non-ASCII text but no UTF-8 BOM")
+    for cmd, ps in (("install.cmd", "install.ps1"), ("scripts/gov.cmd", "gov.ps1"), ("scripts/score.cmd", "score.ps1"),
+                    ("templates/.agents/tools/plan.cmd", "plan.ps1")):
+        t = (ROOT / cmd).read_text()
+        if "-ExecutionPolicy Bypass" not in t or ps not in t:
+            fail(f"{cmd} must call {ps} with -ExecutionPolicy Bypass")
     attrs = (ROOT / ".gitattributes").read_text()
     if "*.sh text eol=lf" not in attrs or "*.ps1 text eol=crlf" not in attrs:
-        failures.append(".gitattributes must force LF for *.sh and CRLF for *.ps1")
-    ps1_norm = ps1.replace("\\", "/")
+        fail(".gitattributes must force LF for *.sh and CRLF for *.ps1")
+    sh_ = (ROOT / "install.sh").read_text()
+    ps_ = (ROOT / "install.ps1").read_text().replace("\\", "/")
     for frag in (".claude/commands", ".cursor/commands", ".github/prompts", ".gemini/commands", ".opencode/commands",
                  ".config/opencode/commands", ".codex", "prompts", "project-init.md", "project-init.prompt.md",
-                 "project-init.toml"):
-        if frag not in sh or frag not in ps1_norm:
-            failures.append(f"install.sh and install.ps1 disagree: {frag!r} missing from one of them")
+                 "project-init.toml", "agent-governance scaffold"):
+        if frag not in sh_ or frag not in ps_:
+            fail(f"install.sh and install.ps1 disagree: {frag!r} missing from one of them")
+    gs, gp = (ROOT / "scripts/gov.sh").read_text(), (ROOT / "scripts/gov.ps1").read_text()
+    for word in ("detect", "scaffold", "upgrade", "record", "CONFLICT", "ORPHAN", "REMOVE", "NEEDS-VARS", "UNKNOWN",
+                 ".agent-gov-new", "init-manifest", "gitignore.append", "pointer.md"):
+        if word not in gs or word not in gp:
+            fail(f"gov.sh and gov.ps1 disagree: {word!r} missing from one of them")
     pwsh = shutil.which("pwsh")
-    if pwsh:  # real run when PowerShell is available
-        h = Path(tempfile.mkdtemp())
-        r = subprocess.run([pwsh, "-NoProfile", "-File", str(ROOT / "install.ps1"), "-Agent", "opencode,cursor"],
-                           capture_output=True, text=True, env=dict(os.environ, HOME=str(h), USERPROFILE=str(h)))
-        if r.returncode or not (h / ".config/opencode/commands/project-init.md").is_file():
-            failures.append(f"install.ps1 under pwsh: {r.stdout}{r.stderr}")
-        shutil.rmtree(h, ignore_errors=True)
+    if not pwsh:
+        print("note: pwsh not found: the Windows scripts were only checked statically")
+        return
+    # with PowerShell present, both shells must produce the same project
+    a, b = mkdir("parity"), mkdir("parity")
+    v = make_vars(a / "vars.env", "AGENTS=claude,gemini\nPLAN_CHECK=yes\nPLAN=bash .agents/tools/plan.sh\n")
+    (b / "vars.env").write_text(v.read_text())
+    sh(ROOT / "scripts/gov.sh", "scaffold", a, "--vars", v, rc=0)
+    run([pwsh, "-NoProfile", "-File", str(ROOT / "scripts/gov.ps1"), "scaffold", str(b), "--vars", str(b / "vars.env")], check_rc=0)
+    ta = {r: c for r, _s, c in tree(a) if r not in ("vars.env", ".agents/init-manifest")}
+    tb = {r: c for r, _s, c in tree(b) if r not in ("vars.env", ".agents/init-manifest")}
+    if {k: v_.replace(b"\r", b"") for k, v_ in ta.items()} != {k: v_.replace(b"\r", b"") for k, v_ in tb.items()}:
+        fail("gov.sh and gov.ps1 scaffolded different files: " + str(sorted(set(ta) ^ set(tb))[:5]))
+    h = mkdir("home")
+    run([pwsh, "-NoProfile", "-File", str(ROOT / "install.ps1"), "-Agent", "opencode"], cwd=a,
+        env={"HOME": str(h), "USERPROFILE": str(h)}, check_rc=0)
+    if not (h / ".config/opencode/commands/project-init.md").is_file():
+        fail("install.ps1 under pwsh did not write the OpenCode command")
 
-    # no leftovers of the old name outside the changelog
-    for f in list(ROOT.rglob("*")):
-        if f.is_file() and ".git" not in f.parts and "__pycache__" not in f.parts and f.name not in ("CHANGELOG.md", "smoke_test.py"):
-            try:
-                txt = f.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            if re.search(r"agent-init|AGENT_INIT", txt):
-                failures.append(f"old name agent-init left in {f.relative_to(ROOT)}")
 
-    # init.md must reference only templates that exist.
-    init = (ROOT / "init.md").read_text()
-    for path in re.findall(r"(?m)^\| `((?:\.|[A-Za-z])[^`|]*)` \| ", init):
-        p = path.rstrip("/*")
-        if p.startswith("templates"):
+# --------------------------------------------------------------------------- repo hygiene
+def test_hygiene():
+    top = re.search(r"(?m)^## (\d+\.\d+\.\d+)", (ROOT / "CHANGELOG.md").read_text())
+    if not top or top.group(1) != (ROOT / "VERSION").read_text().strip():
+        fail("VERSION does not match the top CHANGELOG entry")
+    gone = r"agent-init|AGENT_INIT|check_adr|sync_plan|PROJECT-CHECKS|check_update|plan\.py|--update|--with"
+    for f in ROOT.rglob("*"):
+        if not f.is_file() or ".git" in f.parts or "__pycache__" in f.parts or f.name in ("CHANGELOG.md", "smoke_test.py", ".env", "gov.sh", "gov.ps1"):  # gov.* list legacy file names on purpose
             continue
-        if not any(TEMPLATES.glob(p + "*")) and not (TEMPLATES / p).exists():
-            failures.append(f"init.md references missing template: {path}")
+        try:
+            txt = f.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        m = re.search(gone, txt)
+        if m:
+            fail(f"{f.relative_to(ROOT)} still mentions {m.group(0)!r}")
+    if (ROOT / "templates/.agents/adr").exists() or (ROOT / "scripts/score_init.py").exists():
+        fail("ADR templates / score_init.py must be gone")
+    init = (ROOT / "init.md").read_text()
+    for rel in re.findall(r"`((?:scripts|templates)/[\w./-]+)`", init):
+        if not (ROOT / rel.rstrip("/")).exists():
+            fail(f"init.md mentions {rel}, which does not exist")
+    for cmd in ("detect", "scaffold", "upgrade", "record"):
+        if f"gov.sh {cmd}" not in init:
+            fail(f"init.md does not explain gov.sh {cmd}")
+    if (ROOT / "AGENTS.md").exists() or (ROOT / "plan.csv").exists():
+        fail("the repo itself must not carry a scaffold")
+    # generated agent files: no stray Python command, every placeholder is a known variable
+    known = set(re.findall(r"^[A-Z_]+(?==)", VARS, re.M)) | {"PY", "PLAN", "ROLE_NAME", "ROLE", "ROLE_OWNS", "AGENTS", "PLAN_CHECK",
+                                                             "GIT_HOST", "DEFAULT_BRANCH", "EXTERNAL_TRACKER"}
+    for f in (ROOT / "templates").rglob("*"):
+        if f.is_file():
+            for k in re.findall(r"\{\{([A-Z_]+)\}\}", f.read_text(errors="ignore")):
+                if k not in known:
+                    fail(f"{f.relative_to(ROOT)} uses the unknown placeholder {{{{{k}}}}}")
 
-    for f in failures:
+
+def main():
+    tests = [test_installer, test_detect_and_scaffold, test_upgrade, test_plan_and_score, test_plan_check,
+             test_delete_session, test_windows, test_hygiene]
+    only = sys.argv[1:]
+    try:
+        for t in tests:
+            if only and t.__name__ not in only:
+                continue
+            before = len(FAILURES)
+            try:
+                t()
+            except Exception as e:  # a crashed test is a failure, not a stack trace for the maintainer to decode
+                fail(f"{t.__name__} crashed: {type(e).__name__}: {e}")
+            print(f"{'ok  ' if len(FAILURES) == before else 'FAIL'} {t.__name__}")
+    finally:
+        shutil.rmtree(TMP, ignore_errors=True)
+    for f in FAILURES:
         print("FAIL", f)
-    if failures:
+    if FAILURES:
         sys.exit(1)
     print("OK smoke test")
 

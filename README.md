@@ -1,113 +1,77 @@
 # agent-gov
 
-One file, `init.md`, that an AI coding agent follows to set up a shared way of working in a new project. It suits projects with several people and several AI tools.
-
-The agent reads what already exists, asks about the system, the goal, the stack and the team (if the project is empty), then creates:
+A way for an AI coding agent to set up a shared way of working in a project, and keep it up to date. You install one command (`/project-init`); the agent then reads what the project already has, confirms it with you, asks only what is missing, and scaffolds the rest. It suits projects with several people and several AI tools.
 
 | Axis | What you get |
 |---|---|
-| 1. Context | `AGENTS.md` (one rulebook), `.agents/adr/` (one accepted decision per topic), `.agents/wiki/` (lessons that accumulate), `plan.csv` (the plan) |
-| 2. Action | `/done <task-id>`: gate, commit, open MR/PR, flip status in `plan.csv`. Never merges.<br>Optional `/plan-check`: standup report, see [docs/plan-check.md](docs/plan-check.md). |
-| 3. External | `.agents/tools/sync_plan.py`: stub adapter to mirror `plan.csv` to Jira / Google Sheets / Excel |
-| 4. Team | `.agents/roles.md` plus the `owner`, `status`, `mr`, `reviewer`, `review`, `depends`, `adr` columns of `plan.csv`: who does what, how far, is it right, who blocks whom |
-
-No third-party packages. The helper scripts use only the Python standard library. Every question in `init.md` has a default, so you can answer "defaults" for a quick setup.
+| 1. Context | `AGENTS.md` (one rulebook), `plan.csv` (the plan), `.agents/wiki/` (decisions log, lessons, open questions, working process) |
+| 2. Action | `/done <task-id>`: gate, commit, open MR/PR, update the row in `plan.csv`. Never merges. Optional `/plan-check`: standup report |
+| 3. Team | `.agents/roles.md` plus the `owner`, `status`, `mr`, `reviewer`, `review`, `depends` columns of `plan.csv`: who does what, how far, is it right, who blocks whom |
+| 4. Upgrade | `scripts/gov.sh` keeps the project in step with new releases without overwriting what you changed |
 
 **The rules the scaffold enforces**
 
 - `AGENTS.md` is the only rulebook. `CLAUDE.md` is one line that imports it.
 - `plan.csv` is the source of truth for tasks. Git and the MR/PR state are the truth for "done".
-- One topic has exactly one accepted ADR; a new decision supersedes the old one instead of contradicting it. `check_adr.py` checks numbering, the index and topics.
-- For research projects, the chosen result of an experiment is an ADR with a run-id. Every table and figure in a report must match the accepted run; `check_adr.py --reports` flags the ones that do not.
+- One topic has one current decision in `decisions-log.md`; a new decision supersedes the old one instead of contradicting it. For research projects every number in a report cites the run-id of the chosen result.
 - Whatever an agent learns (decision, fixed error, open question, gotcha) is appended to the wiki in the same session.
+
+No third-party packages. The core is plain `bash` (`install.sh`, `scripts/`, `plan.sh`), with PowerShell/cmd versions for Windows. Python 3.8+ is needed only for `/plan-check` and `claude-delete-session`.
+
+## Install
+
+Clone anywhere, then run the installer for **your terminal** and the agent(s) you use (`claude`, `cursor`, `copilot`, `gemini`, `opencode`, `all`):
+
+| You use | Run |
+|---|---|
+| bash, zsh, fish on Linux or macOS; WSL; Git Bash | `git clone https://github.com/Duc42195/agent-gov.git ~/.agent-gov && ~/.agent-gov/install.sh --agent claude` |
+| PowerShell or cmd.exe on Windows | `git clone https://github.com/Duc42195/agent-gov.git $HOME\.agent-gov`, then on its own line `& $HOME\.agent-gov\install.cmd -Agent claude` |
+
+Restart the agent and type `/project-init` in a project. Details for Windows: [docs/windows.md](docs/windows.md).
+
+- **User-wide (default)** writes only under your home folder, so `/project-init` works in every project. **One project only:** from the project's root add `--project` (`-Project`); it writes only into that folder and never touches your home. Remove with `--uninstall`. Installing both scopes makes the agent list `/project-init` twice; the installer then warns instead of deleting.
+- The installer records your machine (OS, terminal, Python command) in `<agent-gov>/.env`. The agent reads it to run the right script version (`gov.sh` or `gov.ps1`) and the right Python command.
+- Which agents are supported, and how well each was checked: [docs/agents.md](docs/agents.md). Other agents: tell them "Read and follow `<agent-gov>/init.md`".
+- A user-wide `--agent claude` also installs `claude-delete-session` (see below).
 
 ## Use it
 
-`install.sh` writes the `/project-init` command for the agent(s) you name: `claude`, `cursor`, `copilot`, `codex`, `gemini`, `opencode`, `all`, or `other` (no command file; you tell the agent to read `init.md`). Without `--agent` it asks.
+- **New project:** `/project-init`. The agent runs `gov.sh detect` (git, manifest, profile, `plan.csv`, gate guess), shows you the profile it assembled, asks only about what is missing, then `gov.sh scaffold` copies the templates (no agent tokens spent on copying). The last step scores the result and writes a report you can send back.
+- **Project made with an older agent-gov** (even from before releases had manifests): run `/project-init` again. `gov.sh upgrade` first prints a plan: new files are added, untouched files are updated, files agent-gov dropped are removed if you never changed them, and a file you changed is never overwritten (the new version is written next to it as `<file>.agent-gov-new` for the agent to merge). Your own files (`record.md`, notes) are never touched. Moving old content (ADRs into the decisions log, a `record.md` into the wiki) is done by the agent from the `Migrate:` lines of [CHANGELOG.md](CHANGELOG.md), asking before anything big. To update this tool itself: `git -C ~/.agent-gov pull`.
+- **`/plan-check` (optional, question 10 of init).** Compares `plan.csv` with git and every MR/PR and returns one table: on track (today's tasks, then the rest) or behind schedule (late tasks that also block others first, then late, then blockers, then the rest). Your own checks go under `## Standup checks` in `.agents/wiki/working-process.md`. Details: [docs/plan-check.md](docs/plan-check.md).
+- **`claude-delete-session` (Claude Code only).** A terminal list like `claude -r`, for deleting: it shows the sessions of the folder you run it in, newest first; type to search, `Ctrl+A` all projects, `Ctrl+B` current git branch, `Ctrl+V` preview, `Tab` marks several, `Enter` deletes after a y/N question, `Esc` quits. It removes the session file and its data folder. Run it as `claude-delete-session` in a normal terminal, or `!claude-delete-session` at the Claude Code prompt (in bash the `!` repeats an earlier command, so do not type it there). The installer copies it to `~/.local/bin` and, if `jq` is installed, adds the rule `Bash(~/.local/bin/claude-delete-session)` to `~/.claude/settings.json` so it runs without a prompt (without `jq` it only prints the rule). Deleting is permanent. Other agents: see the "Deleting old sessions" table in [docs/agents.md](docs/agents.md).
 
-**Every project, once per machine:**
+## Other agents, and helping improve this
+
+Only Claude Code is used here for real. If you use another agent, **please [raise an issue](https://github.com/Duc42195/agent-gov/issues/new?template=init-report.yml)** with how it went, good or bad. The last step of init runs `scripts/score.sh` (files, leftover placeholders, plan header, tools run, `/done` present, ...) and writes `.agents/state/init-report.md` (git-ignored) with a short self-report from the agent. Review it, remove anything private, and paste it into the *Init report* issue. Nothing is sent automatically. You can also run `scripts/score.sh /path/to/project --agent NAME --model NAME`.
+
+## Files
+
 ```
-git clone https://github.com/Duc42195/agent-gov.git ~/.agent-gov && ~/.agent-gov/install.sh --agent claude
+init.md                        the procedure the agent follows
+install.sh, install.ps1, install.cmd   install /project-init (bash / Windows)
+scripts/gov.sh, gov.ps1, gov.cmd       detect, scaffold, upgrade, record
+scripts/score.sh, score.ps1, score.cmd score a scaffolded project
+templates/                     every file the scaffold copies, mirroring the target paths
+  AGENTS.md, CLAUDE.md, plan.csv, pointer.md, gitignore.append
+  .agents/                     roles, wiki/, tools/plan.{sh,ps1,cmd}, plan-check/ (optional)
+  .claude/ .cursor/ .github/ .opencode/   /done and /plan-check per AI tool
+bin/claude-delete-session{,.ps1}   machine tool (installed to ~/.local/bin)
+docs/                          agents.md, windows.md, plan-check.md
+tests/smoke_test.py            scaffolds into a temp dir and checks everything
+.claude/commands/project-init.md   project-level /project-init for working inside this repo
+VERSION, CHANGELOG.md          release number and upgrade notes
 ```
 
-**One project only** (run from the project root; add `agent-gov/` to `.gitignore` or delete it afterwards):
-```
-git clone https://github.com/Duc42195/agent-gov.git && agent-gov/install.sh --agent claude --project
-```
+## Test and release
 
-Then restart the agent and type `/project-init`. Several agents: `--agent claude,cursor`.
-
-**Windows (PowerShell).** Use `install.cmd` (it calls `install.ps1` with the execution policy bypassed, because Windows blocks unsigned `.ps1` files by default). PowerShell 5.1 has no `&&`, so run the two steps on separate lines:
-```
-git clone https://github.com/Duc42195/agent-gov.git $HOME\.agent-gov
-& $HOME\.agent-gov\install.cmd -Agent claude
-```
-One project only: from the project root, `& .\agent-gov\install.cmd -Agent claude -Project`. Update: `& $HOME\.agent-gov\install.cmd -Update`. The parameters are the same as `install.sh` but with PowerShell names: `-Agent`, `-Project`, `-Update`. It finds Python as `py -3`, `python` or `python3`. For `claude` it copies `bin\claude-delete-session.ps1` to `~\.local\bin` but, unlike `install.sh`, does not edit `settings.json`. If the clone fails or the scripts look garbled, run `git config --global core.autocrlf false` and clone again; `.gitattributes` already keeps `*.sh` as LF. Windows support has not been tested on a real Windows machine yet: **please [raise an issue](https://github.com/Duc42195/agent-gov/issues/new?template=init-report.yml) with the error text if it fails.**
-
-**Python.** The scripts need Python 3.8+. `install.sh` looks for `python3`, `python`, then `py -3` and writes the one it finds into the `/project-init` command (it warns if there is none). Init confirms it, records it in the `Python:` line of `AGENTS.md`, and writes that interpreter into every command it copies, so nothing says a bare `python` your machine does not have. With no Python, `/plan-check` replies `Python 3.8+ not found` instead of failing.
-
-| Agent | User-wide | `--project` |
-|---|---|---|
-| claude | `~/.claude/commands/` | `.claude/commands/` |
-| cursor | `~/.cursor/commands/` | `.cursor/commands/` |
-| copilot | not supported | `.github/prompts/` |
-| codex | `~/.codex/prompts/` | not supported |
-| gemini | `~/.gemini/commands/` | `.gemini/commands/` |
-| opencode | `~/.config/opencode/commands/` | `.opencode/commands/` |
-| other | no file: tell the agent "Read and follow /path/to/agent-gov/init.md" | same |
-
-**New projects from a template.** Tick *Template repository* in the GitHub settings, click *Use this template* per project; `.claude/commands/project-init.md` finds `./init.md` itself.
-
-`/init` is a built-in Claude Code command that creates `CLAUDE.md`, so this repo uses the name `/project-init`.
-
-**What else you get**
-
-- **`/plan-check` (standup, offered by `/project-init`, question 10).** Compares `plan.csv` with git and every MR/PR, says ON TRACK or BEHIND SCHEDULE, and shows who each task blocks, in one table. Init copies it and **tailors the command to your project**: it fills a `Project checks` block with 3–6 read-only checks that fit (gate green, result ADRs match reports, tracker drift, reviews pending, ...). The script and the table template stay fixed. `/done` and `/plan-check` come in Claude Code, Cursor, Copilot and OpenCode variants. Details: [docs/plan-check.md](docs/plan-check.md).
-- **`claude-delete-session` (Claude Code only, installed by default).** A terminal list like `claude -r`, but for deleting: it shows the sessions of the folder you run it in, newest first; type to search, `Ctrl+A` switches to all projects, `Ctrl+B` limits to the current git branch, `Ctrl+V` previews, `Tab` marks several, `Enter` deletes after a y/N question, `Esc` quits. It removes the session file and its data folder. Run it as `claude-delete-session` in a normal terminal, or `!claude-delete-session` at the Claude Code prompt (do not type the `!` in bash: there it repeats an earlier command). A user-wide `install.sh --agent claude` copies it to `~/.local/bin` **and adds the rule `Bash(~/.local/bin/claude-delete-session)` to `~/.claude/settings.json`**. Deleting is permanent. The Windows version `bin/claude-delete-session.ps1` is the older all-projects list and is not tested here.
-
-## Updates
-
-Versions are in `VERSION` and `CHANGELOG.md`; each release lists `Upgrade:` steps for existing projects. Nothing checks for updates by itself: look at the [releases](https://github.com/Duc42195/agent-gov/releases) or the changelog when you want to know.
-
-- **Your clone of this repo:** `/project-init` first runs `git fetch` on it and tells you if it is behind. Update with `~/.agent-gov/install.sh --update` (fast-forward only, prints what changed).
-- **A scaffolded project** stores its version in `.agents/init-version`. To upgrade, run `/project-init` in it: it sees the old version, applies the `Upgrade:` lines of every newer release, and asks before touching files you modified.
+`python3 tests/smoke_test.py` runs the installer (both scopes), `gov.sh` (scaffold and every upgrade case), `plan.sh`, `score.sh`, `plan_check.py` on a throwaway git repo and `claude-delete-session` in a pseudo terminal, and statically checks the Windows scripts (and runs them if `pwsh` exists). Run it after every change.
 
 **Releasing.** Bump `VERSION`, add the matching top entry to `CHANGELOG.md` (the smoke test checks they agree), commit, tag `vX.Y.Z`, push. Choose the number by what an existing project must do to upgrade:
 
 | Bump | When | Existing projects |
 |---|---|---|
-| patch `0.5.1` | a bug fix; behaviour otherwise unchanged | replace one script file, nothing they own |
-| minor `0.6.0` | a new feature, or a change that needs edits to files the project owns (`AGENTS.md`, `plan.csv` columns, command files) | follow the entry's `Upgrade:` lines |
+| patch `0.9.1` | a bug fix; behaviour otherwise unchanged | nothing they own changes |
+| minor `0.10.0` | a new feature, or a change that needs edits to files the project owns (`AGENTS.md`, `plan.csv` columns, command files) | `/project-init` upgrades them; `Migrate:` lines describe content moves |
 
-Docs-only changes (README, `docs/`) do not bump the version. We stay on `0.x` until the scaffold is stable; a major bump is for a change that cannot be upgraded from by the `Upgrade:` lines.
-
-## Other agents, and helping improve this
-
-Only Claude Code is tested here. If you use another agent, **please [raise an issue](https://github.com/Duc42195/agent-gov/issues/new?template=init-report.yml)** with how it went, good or bad.
-
-The last step of `init.md` makes the agent measure itself: `scripts/score_init.py` checks the result objectively (files, leftover placeholders, tools run, profile filled, `/done` present) and writes `.agents/state/init-report.md` (git-ignored). The agent then fills a short self-report: what it could not follow, what was ambiguous, what it changed. Review that file, remove anything private, and paste it into the *Init report* issue. Nothing is sent automatically.
-
-You can also score any project yourself: `python3 scripts/score_init.py /path/to/project --agent NAME --model NAME`.
-
-## Files
-
-```
-VERSION, CHANGELOG.md              release version and upgrade notes
-install.sh, install.ps1, install.cmd  install /project-init (+ claude-delete-session for a user-wide claude install); .ps1/.cmd are for Windows
-init.md                            the procedure the agent follows (short)
-templates/                         every file the agent copies, mirroring target paths
-  AGENTS.md, CLAUDE.md, pointer.md, gitignore.append
-  plan.csv                         the plan, at the project root
-  .agents/                         roles, adr/, wiki/, tools/*.py, init-version
-  .agents/plan-check/              standup script and report templates (optional)
-  .claude/ .cursor/ .github/ .opencode/ /done and /plan-check commands per AI tool
-docs/plan-check.md                 how /plan-check works and how to change its report
-scripts/score_init.py              scores a scaffolded project, writes the init report
-bin/claude-delete-session{,.ps1}   session cleaner (installed on the machine)
-tests/smoke_test.py                scaffolds into a temp dir and runs the checks
-.claude/commands/project-init.md   one-line command: read init.md and follow it
-```
-
-## Test
-
-`python3 tests/smoke_test.py` scaffolds the templates into an empty folder, runs `plan.py` (including `set-deps`), `sync_plan.py`, `check_adr.py` (duplicate-topic and stale run-id detection) and `plan_check.py` on a throwaway git repo, tests `install.sh --update` and the delete-session install, and fails on leftover placeholders or the old name. Run it after every change to `templates/`.
+Docs-only changes do not bump the version. We stay on `0.x` until the scaffold is stable.
